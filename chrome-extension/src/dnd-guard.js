@@ -36,10 +36,33 @@
     return types.includes('Files') || types.includes('application/x-moz-file');
   }
 
+  function isAemAssetsViewUrl (urlStr = '') {
+    if (!urlStr) return false;
+    return (
+      /[?&]repoId=author-p[a-z0-9-]+/i.test(urlStr) ||
+      /\/assets\/browse/i.test(urlStr)
+    );
+  }
+
   function isGuardActive () {
     if (!settings.enabled) return false;
     if (isInsideGuidedUploadModal()) return false;
-    return true;
+
+    if (isAemAssetsViewUrl(location.href)) return true;
+    try {
+      if (window.top && window.top !== window && isAemAssetsViewUrl(window.top.location.href)) {
+        return true;
+      }
+    } catch (e) { /* cross-origin top */ }
+    try {
+      if (window.parent && window.parent !== window && isAemAssetsViewUrl(window.parent.location.href)) {
+        return true;
+      }
+    } catch (e) { /* cross-origin parent */ }
+    if (document.referrer && isAemAssetsViewUrl(document.referrer)) {
+      return true;
+    }
+    return false;
   }
 
   // 1. Patch EventTarget.prototype.addEventListener at document_start so any `dragenter`,
