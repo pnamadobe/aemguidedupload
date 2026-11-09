@@ -1,47 +1,64 @@
-// Capture-phase Drag-and-Drop Interceptor for AEM Assets View.
-// Blocks raw, ungoverned drag-and-drop uploads on the browse grid and hands off
-// dropped files + folder hierarchies to the Guided Upload wizard modal.
+// MAIN-world Capture-Phase & EventTarget.addEventListener Drag-and-Drop Guardrail.
+// Runs at `document_start` in MAIN world before AEM Assets View's scripts load,
+// ensuring native ungoverned drag-and-drop upload listeners never fire.
 (() => {
   'use strict';
   if (globalThis.__guDndGuardInstalled) return;
   globalThis.__guDndGuardInstalled = true;
 
-  // Never intercept inside the Guided Upload modal iframe itself!
   const isInsideGuidedUploadModal = () =>
     /modal-guided-upload/i.test(location.hash || '') ||
-    /modal-guided-upload/i.test(location.href || '');
+    /modal-guided-upload/i.test(location.href || '') ||
+    /\.adobeio-static\.net$/i.test(location.hostname || '');
 
-  const DEFAULTS = {
+  // Never intercept inside the Guided Upload modal iframe itself!
+  if (isInsideGuidedUploadModal()) return;
+
+  let settings = {
     enabled: true,
     handoffOnDrop: true
   };
 
-  let settings = { ...DEFAULTS };
+  window.addEventListener('message', (e) => {
+    if (e.data && e.data.__GU_SETTINGS__) {
+      settings = { ...settings, ...e.data.__GU_SETTINGS__ };
+    }
+  });
+
   let dragDepth = 0;
   let overlayHost = null;
   let toastHost = null;
+  let lastDropHandledAt = 0;
 
-  try {
-    chrome.storage?.sync.get(DEFAULTS, (stored) => {
-      settings = { ...DEFAULTS, ...stored };
-    });
-    chrome.storage?.onChanged.addListener((changes, area) => {
-      if (area !== 'sync') return;
-      for (const k of Object.keys(changes)) {
-        if (k in DEFAULTS) settings[k] = changes[k].newValue ?? DEFAULTS[k];
-      }
-    });
-  } catch (e) {
-    // fallback to defaults
+  function isFileDragEvent (e) {
+    if (!e || !e.dataTransfer) return false;
+    const types = e.dataTransfer.types ? Array.from(e.dataTransfer.types) : [];
+    return types.includes('Files') || types.includes('application/x-moz-file');
   }
 
-  function isAssetsViewBrowseActive () {
+  function isGuardActive () {
+    if (!settings.enabled) return false;
     if (isInsideGuidedUploadModal()) return false;
-    const bridge = globalThis.__guModalBridge;
-    if (!bridge) return false;
-    const { isBrowseView } = bridge.parseAssetsViewLocation(location.href);
-    return isBrowseView;
+    return true;
   }
+
+  // 1. Patch EventTarget.prototype.addEventListener at document_start so any `dragenter`,
+  //    `dragover`, or `drop` listener registered by AEM Assets View is skipped on file drags!
+  const DND_EVENTS = new Set(['dragenter', 'dragover', 'dragleave', 'drop']);
+  const origAddEventListener = EventTarget.prototype.addEventListener;
+  EventTarget.prototype.addEventListener = function (type, listener, options) {
+    if (DND_EVENTS.has(type) && typeof listener === 'function' && !listener.__guInternal) {
+      const wrapped = function (event) {
+        if (isGuardActive() && isFileDragEvent(event)) {
+          // Swallow native page listener for file drag/drop
+          return undefined;
+        }
+        return listener.apply(this, arguments);
+      };
+      return origAddEventListener.call(this, type, wrapped, options);
+    }
+    return origAddEventListener.call(this, type, listener, options);
+  };
 
   function showDropOverlay () {
     if (overlayHost) return;
@@ -59,7 +76,7 @@
           display: flex;
           align-items: center;
           justify-content: center;
-          background: rgba(13, 102, 208, 0.14);
+          background: rgba(13, 102, 208, 0.16);
           backdrop-filter: blur(2px);
           font-family: adobe-clean, "Source Sans Pro", -apple-system, BlinkMacSystemFont, sans-serif;
         }
@@ -69,7 +86,7 @@
           border: 2px dashed #1473e6;
           border-radius: 14px;
           padding: 28px 36px;
-          box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+          box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
           text-align: center;
           max-width: 520px;
         }
@@ -149,65 +166,64 @@
         toastHost.remove();
         toastHost = null;
       }
-    }, 4000);
+    }, 4500);
   }
 
   function onDragEnter (e) {
-    if (!settings.enabled || !isAssetsViewBrowseActive()) return;
-    const reader = globalThis.__guFolderReader;
-    if (!reader || !reader.hasFilePayload(e.dataTransfer)) return;
-
+    if (!isGuardActive() || !isFileDragEvent(e)) return;
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
-
     dragDepth++;
     showDropOverlay();
   }
+  onDragEnter.__guInternal = true;
 
   function onDragOver (e) {
-    if (!settings.enabled || !isAssetsViewBrowseActive()) return;
-    const reader = globalThis.__guFolderReader;
-    if (!reader || !reader.hasFilePayload(e.dataTransfer)) return;
-
+    if (!isGuardActive() || !isFileDragEvent(e)) return;
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
-    if (e.dataTransfer) {
+    try {
       e.dataTransfer.dropEffect = 'copy';
-    }
+    } catch (err) { /* ignore */ }
     showDropOverlay();
   }
+  onDragOver.__guInternal = true;
 
   function onDragLeave (e) {
-    if (!settings.enabled || !isAssetsViewBrowseActive()) return;
+    if (!isGuardActive()) return;
     dragDepth = Math.max(0, dragDepth - 1);
     if (dragDepth === 0 || e.relatedTarget === null) {
       hideDropOverlay();
     }
   }
+  onDragLeave.__guInternal = true;
 
   async function onDrop (e) {
-    if (!settings.enabled || !isAssetsViewBrowseActive()) return;
-    const reader = globalThis.__guFolderReader;
-    const bridge = globalThis.__guModalBridge;
-    if (!reader || !reader.hasFilePayload(e.dataTransfer)) return;
+    if (!isGuardActive() || !isFileDragEvent(e)) return;
 
-    // 1. Block AEM Assets View's built-in ungoverned dropzone immediately in capture phase
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
     hideDropOverlay();
 
-    if (!settings.handoffOnDrop || !bridge) {
+    // Prevent duplicate handling between window and document capture listeners
+    const now = Date.now();
+    if (now - lastDropHandledAt < 300) return;
+    lastDropHandledAt = now;
+
+    const reader = globalThis.__guFolderReader;
+    const bridge = globalThis.__guModalBridge;
+
+    if (!settings.handoffOnDrop || !bridge || !reader) {
       showStatusBanner('🛡️ Direct drop blocked — click "Add assets" to use Guided Upload.');
       return;
     }
 
-    // 2. Synchronously capture FileSystemEntry roots before the first await!
+    // Synchronously capture FileSystemEntry roots before the first await!
     const snapshot = reader.captureDropSnapshotSync(e.dataTransfer);
 
-    // 3. Recursively read dropped files & nested folders, then hand off to Guided Upload Modal
     try {
       const items = await reader.resolveSnapshotToItems(snapshot);
       if (items.length > 0) {
@@ -223,9 +239,12 @@
       bridge.stageDroppedFilesAndOpenModal([]);
     }
   }
+  onDrop.__guInternal = true;
 
-  window.addEventListener('dragenter', onDragEnter, true);
-  window.addEventListener('dragover', onDragOver, true);
-  window.addEventListener('dragleave', onDragLeave, true);
-  window.addEventListener('drop', onDrop, true);
+  for (const target of [window, document]) {
+    origAddEventListener.call(target, 'dragenter', onDragEnter, true);
+    origAddEventListener.call(target, 'dragover', onDragOver, true);
+    origAddEventListener.call(target, 'dragleave', onDragLeave, true);
+    origAddEventListener.call(target, 'drop', onDrop, true);
+  }
 })();

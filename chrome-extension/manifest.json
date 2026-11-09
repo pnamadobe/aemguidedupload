@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AEM Guided Upload — Drag-and-Drop Guardrail",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Blocks raw ungoverned drag-and-drop uploads on the AEM Assets View grid and hands dropped files and folder structures directly to the Guided Upload wizard modal.",
   "icons": {
     "16": "icons/icon16.png",
@@ -21,21 +21,31 @@
     "storage"
   ],
   "host_permissions": [
-    "https://experience.adobe.com/*",
-    "https://experience-stage.adobe.com/*",
+    "https://*.adobe.com/*",
     "https://*.adobeaemcloud.com/*"
   ],
   "content_scripts": [
     {
       "matches": [
-        "https://experience.adobe.com/*",
-        "https://experience-stage.adobe.com/*",
+        "https://*.adobe.com/*",
         "https://*.adobeaemcloud.com/*"
       ],
       "js": [
         "src/folder-reader.js",
         "src/modal-bridge.js",
         "src/dnd-guard.js"
+      ],
+      "world": "MAIN",
+      "run_at": "document_start",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "https://*.adobe.com/*",
+        "https://*.adobeaemcloud.com/*"
+      ],
+      "js": [
+        "src/settings-sync.js"
       ],
       "run_at": "document_start",
       "all_frames": true

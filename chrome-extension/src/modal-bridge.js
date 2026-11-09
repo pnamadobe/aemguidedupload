@@ -1,15 +1,19 @@
-// Bridges dropped File trees from the AEM Assets View host window into the App Builder
+// Bridges dropped File trees from any AEM Assets View frame into the App Builder
 // Guided Upload modal iframe and triggers opening the modal on drop.
 (() => {
   'use strict';
   if (globalThis.__guModalBridge) return;
 
   const HANDOFF_NS = '__GUIDED_UPLOAD__';
-  const PENDING_TTL_MS = 30000;
+  const PENDING_TTL_MS = 45000;
 
   let pendingBatch = null;
+  let lastKnownContext = {
+    aemAuthorUrl: '',
+    folderPath: '/content/dam'
+  };
 
-  function parseAssetsViewLocation (href = location.href) {
+  function extractContextFromUrlString (href = '') {
     try {
       const u = new URL(href);
       const repo =
@@ -20,19 +24,82 @@
         ? `https://${repo}`
         : (/^https:\/\/author-[a-z0-9-]+\.adobeaemcloud\.com/i.test(u.origin) ? u.origin : '');
       const m = u.hash.match(/\/assets\/browse(\/content\/dam(?:\/[^?#]*)?)/i);
-      const folderPath = m ? decodeURIComponent(m[1]).replace(/\/+$/, '') : '/content/dam';
-      const isBrowseView = /\/assets\/browse/i.test(u.hash) || /\/assets\/browse/i.test(u.pathname);
-      return { aemAuthorUrl, folderPath: folderPath || '/content/dam', isBrowseView };
+      const folderPath = m ? decodeURIComponent(m[1]).replace(/\/+$/, '') : '';
+      return { aemAuthorUrl, folderPath };
     } catch (e) {
-      return { aemAuthorUrl: '', folderPath: '/content/dam', isBrowseView: false };
+      return { aemAuthorUrl: '', folderPath: '' };
     }
   }
 
+  function parseAssetsViewLocation () {
+    const candidates = [location.href];
+    try {
+      if (window.top && window.top !== window && window.top.location?.href) {
+        candidates.unshift(window.top.location.href);
+      }
+    } catch (e) { /* cross-origin top */ }
+    try {
+      if (window.parent && window.parent !== window && window.parent.location?.href) {
+        candidates.unshift(window.parent.location.href);
+      }
+    } catch (e) { /* cross-origin parent */ }
+    if (document.referrer) {
+      candidates.push(document.referrer);
+    }
+
+    let aemAuthorUrl = lastKnownContext.aemAuthorUrl || '';
+    let folderPath = '';
+
+    for (const c of candidates) {
+      const parsed = extractContextFromUrlString(c);
+      if (parsed.aemAuthorUrl && !aemAuthorUrl) aemAuthorUrl = parsed.aemAuthorUrl;
+      if (parsed.folderPath && !folderPath) folderPath = parsed.folderPath;
+    }
+
+    if (folderPath) lastKnownContext.folderPath = folderPath;
+    if (aemAuthorUrl) lastKnownContext.aemAuthorUrl = aemAuthorUrl;
+
+    return {
+      aemAuthorUrl: aemAuthorUrl || '',
+      folderPath: folderPath || lastKnownContext.folderPath || '/content/dam'
+    };
+  }
+
+  /**
+   * Recursively walks all open Shadow DOM roots and light DOM to find matching elements.
+   */
+  function queryAllDeep (root = document, visited = new Set()) {
+    const out = [];
+    if (!root || visited.has(root)) return out;
+    visited.add(root);
+
+    const nodes = root.querySelectorAll ? root.querySelectorAll('*') : [];
+    for (const el of nodes) {
+      out.push(el);
+      if (el.shadowRoot) {
+        out.push(...queryAllDeep(el.shadowRoot, visited));
+      }
+    }
+    return out;
+  }
+
   function findAndClickAddAssetsButton () {
-    const candidates = Array.from(document.querySelectorAll('button, [role="button"], sp-button, sp-action-button'));
-    for (const el of candidates) {
-      const label = (el.textContent || el.getAttribute('aria-label') || el.getAttribute('title') || '').trim();
-      const dataId = (el.getAttribute('data-id') || el.getAttribute('id') || '').toLowerCase();
+    const allElements = queryAllDeep(document);
+    for (const el of allElements) {
+      const tag = (el.tagName || '').toLowerCase();
+      const role = (el.getAttribute && el.getAttribute('role')) || '';
+      if (tag !== 'button' && role !== 'button' && !tag.startsWith('sp-')) continue;
+
+      const label = (
+        el.textContent ||
+        (el.getAttribute && (el.getAttribute('aria-label') || el.getAttribute('title'))) ||
+        ''
+      ).trim();
+      const dataId = (
+        (el.getAttribute && (el.getAttribute('data-id') || el.getAttribute('data-testid') || el.getAttribute('id'))) ||
+        ''
+      ).toLowerCase();
+
       if (/^add\s+assets$/i.test(label) || dataId === 'addassets' || dataId === 'add-assets') {
         el.click();
         return true;
@@ -41,25 +108,31 @@
     return false;
   }
 
-  function broadcastOpenModalToExtensionFrames (folderPath, aemAuthorUrl) {
-    const msg = {
-      [HANDOFF_NS]: 'OPEN_MODAL_FROM_DROP',
-      folderPath,
-      aemAuthorUrl
-    };
-    const iframes = Array.from(document.querySelectorAll('iframe'));
-    let sent = 0;
-    for (const frame of iframes) {
+  /**
+   * Broadcasts a postMessage to EVERY frame in the window hierarchy via `win.frames`
+   * (works even when `<iframe>` elements are encapsulated inside Shadow DOM!).
+   */
+  function broadcastToAllFrames (msg) {
+    let rootWin = window;
+    try {
+      if (window.top) rootWin = window.top;
+    } catch (e) { /* ignore */ }
+
+    const visited = new Set();
+    function walkFrames (win) {
+      if (!win || visited.has(win)) return;
+      visited.add(win);
       try {
-        if (frame.contentWindow) {
-          frame.contentWindow.postMessage(msg, '*');
-          sent++;
+        win.postMessage(msg, '*');
+      } catch (e) { /* ignore */ }
+      try {
+        for (let i = 0; i < win.frames.length; i++) {
+          walkFrames(win.frames[i]);
         }
-      } catch (e) {
-        // ignore cross-origin access errors
-      }
+      } catch (e) { /* ignore */ }
     }
-    return sent > 0;
+
+    walkFrames(rootWin);
   }
 
   function deliverPendingBatchToFrame (targetWindow) {
@@ -88,18 +161,35 @@
   window.addEventListener('message', (event) => {
     const data = event && event.data;
     if (!data || typeof data !== 'object') return;
-    if (data[HANDOFF_NS] === 'MODAL_READY' && event.source) {
-      if (deliverPendingBatchToFrame(event.source)) {
-        // Clear pending batch slightly after delivery so duplicate MODAL_READY pings still work
+
+    if (data[HANDOFF_NS] === 'STAGE_BATCH' && Array.isArray(data.items)) {
+      pendingBatch = {
+        createdAt: Date.now(),
+        folderPath: data.folderPath || '/content/dam',
+        aemAuthorUrl: data.aemAuthorUrl || '',
+        items: data.items
+      };
+      return;
+    }
+
+    // If any frame signals MODAL_READY, deliver the staged batch to it and broadcast
+    if (data[HANDOFF_NS] === 'MODAL_READY') {
+      if (event.source && deliverPendingBatchToFrame(event.source)) {
+        broadcastToAllFrames({
+          [HANDOFF_NS]: 'DROPPED_FILES',
+          folderPath: pendingBatch.folderPath,
+          aemAuthorUrl: pendingBatch.aemAuthorUrl,
+          items: pendingBatch.items
+        });
         setTimeout(() => {
           pendingBatch = null;
-        }, 1200);
+        }, 1500);
       }
     }
   });
 
   function stageDroppedFilesAndOpenModal (items = []) {
-    const { folderPath, aemAuthorUrl } = parseAssetsViewLocation(location.href);
+    const { folderPath, aemAuthorUrl } = parseAssetsViewLocation();
     pendingBatch = {
       createdAt: Date.now(),
       folderPath,
@@ -107,25 +197,36 @@
       items
     };
 
-    // 1. If the Guided Upload modal iframe is already open on the page, push directly to it
-    const iframes = Array.from(document.querySelectorAll('iframe'));
-    for (const frame of iframes) {
-      const src = String(frame.getAttribute('src') || '');
-      if (src.includes('modal-guided-upload')) {
-        deliverPendingBatchToFrame(frame.contentWindow);
-        return;
-      }
-    }
+    // 0. Sync pendingBatch across all frames so whichever frame receives MODAL_READY can answer
+    broadcastToAllFrames({
+      [HANDOFF_NS]: 'STAGE_BATCH',
+      folderPath,
+      aemAuthorUrl,
+      items
+    });
 
-    // 2. Message the ExtensionRegistration iframe directly AND click "Add assets" if needed
-    const messaged = broadcastOpenModalToExtensionFrames(folderPath, aemAuthorUrl);
-    if (!messaged) {
-      findAndClickAddAssetsButton();
-    }
+    // 1. Broadcast DROPPED_FILES in case the Guided Upload modal is already open
+    broadcastToAllFrames({
+      [HANDOFF_NS]: 'DROPPED_FILES',
+      folderPath,
+      aemAuthorUrl,
+      items
+    });
+
+    // 2. Broadcast OPEN_MODAL_FROM_DROP to all frames (reaches ExtensionRegistration.js iframe even inside Shadow DOM)
+    broadcastToAllFrames({
+      [HANDOFF_NS]: 'OPEN_MODAL_FROM_DROP',
+      folderPath,
+      aemAuthorUrl
+    });
+
+    // 3. Also attempt clicking the "Add assets" button in this frame if present
+    findAndClickAddAssetsButton();
   }
 
   globalThis.__guModalBridge = {
     parseAssetsViewLocation,
-    stageDroppedFilesAndOpenModal
+    stageDroppedFilesAndOpenModal,
+    broadcastToAllFrames
   };
 })();
