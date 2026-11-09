@@ -13,3 +13,6 @@ coverage/
 **/coverage/
 .DS_Store
 **/.DS_Store
+
+.aws.tmp.creds.json
+**/.aws.tmp.creds.json
