@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>AEM Guided Upload Guardrail — Options</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 0;
+      padding: 18px 20px;
+      min-width: 320px;
+      color: #222;
+      background: #fafafa;
+    }
+    h2 {
+      margin: 0 0 6px;
+      font-size: 15px;
+    }
+    p {
+      margin: 0 0 14px;
+      font-size: 12px;
+      color: #666;
+      line-height: 1.4;
+    }
+    label {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      margin-bottom: 10px;
+      cursor: pointer;
+    }
+    .status {
+      font-size: 11.5px;
+      color: #0f7d55;
+      margin-top: 8px;
+      min-height: 16px;
+    }
+  </style>
+</head>
+<body>
+  <h2>🛡️ AEM Guided Upload Guardrail</h2>
+  <p>Intercepts raw drag-and-drop uploads on the AEM Assets View grid and routes dropped files/folders into the Guided Upload modal.</p>
+
+  <label>
+    <input type="checkbox" id="enabled" checked>
+    <span>Intercept ungoverned drag-and-drop on Assets View grid</span>
+  </label>
+
+  <label>
+    <input type="checkbox" id="handoffOnDrop" checked>
+    <span>Auto-open Guided Upload &amp; hand off dropped files/folders</span>
+  </label>
+
+  <div class="status" id="status"></div>
+  <script src="options.js"></script>
+</body>
+</html>

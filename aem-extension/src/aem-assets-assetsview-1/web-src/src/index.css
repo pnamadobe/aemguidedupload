@@ -1,0 +1,99 @@
+html,
+body {
+  margin: 0;
+  padding: 0;
+  font-family: adobe-clean, "Source Sans Pro", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.gu-dropzone {
+  border: 2px dashed #8e8e8e;
+  border-radius: 10px;
+  padding: 28px 20px;
+  text-align: center;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+  cursor: pointer;
+}
+
+.gu-dropzone.gu-dragover {
+  border-color: #1473e6;
+  background-color: rgba(20, 115, 230, 0.08);
+}
+
+.gu-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  background: rgba(20, 115, 230, 0.12);
+  color: #0d66d0;
+  border: 1px solid rgba(20, 115, 230, 0.3);
+}
+
+.gu-token-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  cursor: pointer;
+  border: 1px solid #d0d0d0;
+  background: #ffffff;
+  color: #222222;
+  transition: all 0.12s ease;
+}
+
+.gu-token-btn:hover {
+  border-color: #1473e6;
+  background: rgba(20, 115, 230, 0.08);
+  color: #0d66d0;
+}
+
+.gu-badge-req {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  background: rgba(201, 37, 45, 0.12);
+  color: #c9252d;
+}
+
+.gu-badge-ok {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  background: rgba(15, 125, 85, 0.14);
+  color: #0f7d55;
+}
+
+.gu-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.gu-table th,
+.gu-table td {
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+}
+
+.gu-table th {
+  font-weight: 700;
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  opacity: 0.75;
+}

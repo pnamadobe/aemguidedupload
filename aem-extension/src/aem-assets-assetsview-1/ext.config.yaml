@@ -1,0 +1,30 @@
+operations:
+  view:
+    - type: web
+      impl: index.html
+actions: actions
+web: web-src
+hooks:
+  post-app-deploy: ./hooks/post-deploy.js
+runtimeManifest:
+  packages:
+    aem-assets-assetsview-1:
+      license: Apache-2.0
+      actions:
+        guided-upload-api:
+          function: actions/guided-upload-api/index.js
+          web: 'yes'
+          runtime: nodejs:22
+          inputs:
+            LOG_LEVEL: debug
+            AEM_AUTHOR_URL: $AEM_AUTHOR_URL
+            AEM_SC_JSON: $AEM_SC_JSON
+            AEM_DEV_TOKEN: $AEM_DEV_TOKEN
+          limits:
+            timeout: 120000
+            memorySize: 256
+          annotations:
+            # Caller authentication and DAM folder access are validated in-action using the
+            # signed-in user's bearer token.
+            require-adobe-auth: false
+            final: true

@@ -1,0 +1,15 @@
+node_modules
+**/node_modules
+.env
+**/.env
+.aio
+**/.aio
+.wskprops
+dist/
+**/dist/
+.parcel-cache/
+**/.parcel-cache/
+coverage/
+**/coverage/
+.DS_Store
+**/.DS_Store
