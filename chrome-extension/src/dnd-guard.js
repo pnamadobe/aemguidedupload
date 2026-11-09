@@ -65,23 +65,9 @@
     return false;
   }
 
-  // 1. Patch EventTarget.prototype.addEventListener at document_start so any `dragenter`,
-  //    `dragover`, or `drop` listener registered by AEM Assets View is skipped on file drags!
-  const DND_EVENTS = new Set(['dragenter', 'dragover', 'dragleave', 'drop']);
-  const origAddEventListener = EventTarget.prototype.addEventListener;
-  EventTarget.prototype.addEventListener = function (type, listener, options) {
-    if (DND_EVENTS.has(type) && typeof listener === 'function' && !listener.__guInternal) {
-      const wrapped = function (event) {
-        if (isGuardActive() && isFileDragEvent(event)) {
-          // Swallow native page listener for file drag/drop
-          return undefined;
-        }
-        return listener.apply(this, arguments);
-      };
-      return origAddEventListener.call(this, type, wrapped, options);
-    }
-    return origAddEventListener.call(this, type, listener, options);
-  };
+  // Register capture-phase listeners at document_start on `window` (runs before any page
+  // scripts load, so `e.stopImmediatePropagation()` blocks all page drag/drop listeners
+  // without monkey-patching EventTarget.prototype.addEventListener).
 
   function showDropOverlay () {
     if (overlayHost) return;
@@ -265,9 +251,9 @@
   onDrop.__guInternal = true;
 
   for (const target of [window, document]) {
-    origAddEventListener.call(target, 'dragenter', onDragEnter, true);
-    origAddEventListener.call(target, 'dragover', onDragOver, true);
-    origAddEventListener.call(target, 'dragleave', onDragLeave, true);
-    origAddEventListener.call(target, 'drop', onDrop, true);
+    target.addEventListener('dragenter', onDragEnter, true);
+    target.addEventListener('dragover', onDragOver, true);
+    target.addEventListener('dragleave', onDragLeave, true);
+    target.addEventListener('drop', onDrop, true);
   }
 })();
