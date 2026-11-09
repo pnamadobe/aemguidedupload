@@ -13,23 +13,173 @@ import {
   Divider
 } from '@adobe/react-spectrum';
 
+export function humanTitleFromFileName (fileName = '') {
+  return String(fileName || '')
+    .replace(/\.[^.]+$/, '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b[a-z]/g, (ch) => ch.toUpperCase());
+}
+
+function PerAssetTitleField ({
+  field,
+  queuedFiles = [],
+  perAssetTitles = {},
+  onChangePerAssetTitle,
+  onBatchSetPerAssetTitles,
+  singleValue = '',
+  onChangeSingleValue,
+  errorMessage
+}) {
+  const [prefixInput, setPrefixInput] = useState('');
+
+  // If 0 or 1 file is queued, render a standard single TextField (synced with the single file)
+  if (queuedFiles.length <= 1) {
+    const onlyFile = queuedFiles[0];
+    const effectiveVal = onlyFile
+      ? (perAssetTitles[onlyFile.id] !== undefined ? perAssetTitles[onlyFile.id] : singleValue)
+      : singleValue;
+
+    return (
+      <TextField
+        label={`${field.label} (${field.property})`}
+        isRequired={field.required}
+        placeholder={field.placeholder || 'Asset title'}
+        value={effectiveVal || ''}
+        onChange={(v) => {
+          onChangeSingleValue(v);
+          if (onlyFile && typeof onChangePerAssetTitle === 'function') {
+            onChangePerAssetTitle(onlyFile.id, v);
+          }
+        }}
+        validationState={errorMessage ? 'invalid' : undefined}
+        errorMessage={errorMessage}
+        width="100%"
+      />
+    );
+  }
+
+  const autoFillFromNames = () => {
+    const next = {};
+    for (const f of queuedFiles) {
+      const baseTitle = humanTitleFromFileName(f.name) || f.name;
+      next[f.id] = prefixInput.trim() ? `${prefixInput.trim()} — ${baseTitle}` : baseTitle;
+    }
+    if (typeof onBatchSetPerAssetTitles === 'function') {
+      onBatchSetPerAssetTitles(next);
+    }
+  };
+
+  return (
+    <View backgroundColor="gray-75" padding="size-150" borderRadius="regular">
+      <Flex direction="column" gap="size-125">
+        <Flex justifyContent="space-between" alignItems="center" wrap gap="size-100">
+          <Flex alignItems="center" gap="size-75">
+            <Text>
+              <b>{field.label} — Per-Asset Titles ({queuedFiles.length} assets)</b>{' '}
+              {field.required && <span style={{ color: '#c9252d' }}>*</span>}
+            </Text>
+            <span style={{ fontSize: '11px', opacity: 0.65 }}>({field.property})</span>
+          </Flex>
+          <Flex gap="size-75" alignItems="end" wrap>
+            <TextField
+              label="Optional Prefix"
+              placeholder="e.g. Winter 2026"
+              value={prefixInput}
+              onChange={setPrefixInput}
+              width="size-2000"
+            />
+            <ActionButton onPress={autoFillFromNames}>
+              {prefixInput.trim() ? 'Apply Prefix + Filename to All' : 'Reset from Filenames'}
+            </ActionButton>
+          </Flex>
+        </Flex>
+
+        <View maxHeight="size-2400" overflow="auto" backgroundColor="gray-50" padding="size-100" borderRadius="regular">
+          <table className="gu-table">
+            <thead>
+              <tr>
+                <th style={{ width: '42%' }}>Queued File</th>
+                <th>Asset Title (<code>dc:title</code>) *</th>
+              </tr>
+            </thead>
+            <tbody>
+              {queuedFiles.map((f) => {
+                const currentTitle = perAssetTitles[f.id] || '';
+                const isMissing = field.required && !currentTitle.trim();
+                return (
+                  <tr key={f.id}>
+                    <td>
+                      <code>{f.relativePath || f.name}</code>
+                    </td>
+                    <td>
+                      <input
+                        type="text"
+                        value={currentTitle}
+                        placeholder="Enter title for this asset..."
+                        onChange={(e) => onChangePerAssetTitle(f.id, e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '5px 8px',
+                          borderRadius: '4px',
+                          border: isMissing ? '1px solid #c9252d' : '1px solid #8e8e8e',
+                          fontSize: '12.5px'
+                        }}
+                      />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </View>
+
+        {errorMessage && (
+          <Text UNSAFE_style={{ color: '#c9252d', fontSize: '12px' }}>
+            ✖ {errorMessage}
+          </Text>
+        )}
+      </Flex>
+    </View>
+  );
+}
+
 function TagPickerField ({ field, value = [], onChange, availableTags = [], errorMessage }) {
   const [filterText, setFilterText] = useState('');
   const [customTagInput, setCustomTagInput] = useState('');
   const selectedIds = Array.isArray(value) ? value : (value ? [String(value)] : []);
 
-  const filteredTags = availableTags
+  const rootTag = field.rootTag || null;
+  const rootPrefix = rootTag && rootTag.id ? String(rootTag.id) : '';
+
+  // Respect `rootTag` when specified on the schema field: use `field.scopedTags` if fetched,
+  // or filter `availableTags` by `rootPrefix`.
+  const candidatePool = (Array.isArray(field.scopedTags) && field.scopedTags.length > 0)
+    ? field.scopedTags
+    : (rootPrefix
+      ? availableTags.filter((t) => String(t.id || '').startsWith(rootPrefix))
+      : availableTags);
+
+  const filteredTags = candidatePool
     .filter((t) => {
       if (selectedIds.includes(t.id)) return false;
       if (!filterText.trim()) return true;
       const q = filterText.toLowerCase();
       return t.label.toLowerCase().includes(q) || t.id.toLowerCase().includes(q);
     })
-    .slice(0, 30);
+    .slice(0, 35);
 
   const addTag = (tagId) => {
-    const clean = String(tagId || '').trim();
-    if (!clean || selectedIds.includes(clean)) return;
+    let clean = String(tagId || '').trim();
+    if (!clean) return;
+    // If field has a rootTag and user typed a bare child slug (e.g. "running"), prefix it automatically
+    if (rootPrefix && !clean.includes(':')) {
+      clean = rootPrefix.endsWith(':')
+        ? `${rootPrefix}${clean.replace(/^\/+/, '')}`
+        : `${rootPrefix}/${clean.replace(/^\/+/, '')}`;
+    }
+    if (selectedIds.includes(clean)) return;
     onChange([...selectedIds, clean]);
   };
 
@@ -40,17 +190,24 @@ function TagPickerField ({ field, value = [], onChange, availableTags = [], erro
   return (
     <View>
       <Flex direction="column" gap="size-75">
-        <Flex alignItems="center" gap="size-75">
+        <Flex alignItems="center" gap="size-100" wrap>
           <Text>
             <b>{field.label}</b> {field.required && <span style={{ color: '#c9252d' }}>*</span>}
           </Text>
           <span style={{ fontSize: '11px', opacity: 0.65 }}>({field.property})</span>
+          {rootTag && (
+            <span className="gu-chip" title={`Tag root path: ${rootTag.path}`}>
+              Scoped to Root: {rootTag.name || rootTag.id} ({candidatePool.length} tags)
+            </span>
+          )}
         </Flex>
 
         {selectedIds.length > 0 && (
           <Flex wrap gap="size-75">
             {selectedIds.map((tagId) => {
-              const hit = availableTags.find((t) => t.id === tagId);
+              const hit =
+                candidatePool.find((t) => t.id === tagId) ||
+                availableTags.find((t) => t.id === tagId);
               return (
                 <span key={tagId} className="gu-chip">
                   {hit ? hit.label : tagId}
@@ -76,8 +233,8 @@ function TagPickerField ({ field, value = [], onChange, availableTags = [], erro
 
         <Flex gap="size-100" wrap alignItems="end">
           <TextField
-            label="Filter AEM Taxonomy Tags"
-            placeholder="Search brand, channel, region, category..."
+            label={rootTag ? `Filter "${rootTag.name}" Tags` : 'Filter AEM Taxonomy Tags'}
+            placeholder="Search tags..."
             value={filterText}
             onChange={setFilterText}
             width="size-3000"
@@ -85,7 +242,7 @@ function TagPickerField ({ field, value = [], onChange, availableTags = [], erro
           {filteredTags.length > 0 && (
             <Picker
               label="Select Taxonomy Tag"
-              placeholder={`Choose from ${availableTags.length} AEM tags...`}
+              placeholder={`Choose from ${candidatePool.length} allowed tag(s)...`}
               items={filteredTags}
               onSelectionChange={(key) => {
                 if (key) addTag(String(key));
@@ -97,8 +254,8 @@ function TagPickerField ({ field, value = [], onChange, availableTags = [], erro
           )}
           <Flex gap="size-75" alignItems="end">
             <TextField
-              label="Or add tag ID (namespace:tag)"
-              placeholder="e.g. region:amer"
+              label={rootPrefix ? `Or add under ${rootPrefix}` : 'Or add tag ID (namespace:tag)'}
+              placeholder={rootPrefix ? `${rootPrefix}example` : 'e.g. region:amer'}
               value={customTagInput}
               onChange={setCustomTagInput}
               width="size-2400"
@@ -126,8 +283,33 @@ function TagPickerField ({ field, value = [], onChange, availableTags = [], erro
   );
 }
 
-function SingleSchemaField ({ field, value, onChange, availableTags = [], errorMessage }) {
+function SingleSchemaField ({
+  field,
+  value,
+  onChange,
+  availableTags = [],
+  queuedFiles = [],
+  perAssetTitles = {},
+  onChangePerAssetTitle,
+  onBatchSetPerAssetTitles,
+  errorMessage
+}) {
   const labelWithProperty = `${field.label} (${field.property})`;
+
+  if (field.property === 'dc:title') {
+    return (
+      <PerAssetTitleField
+        field={field}
+        queuedFiles={queuedFiles}
+        perAssetTitles={perAssetTitles}
+        onChangePerAssetTitle={onChangePerAssetTitle}
+        onBatchSetPerAssetTitles={onBatchSetPerAssetTitles}
+        singleValue={value}
+        onChangeSingleValue={onChange}
+        errorMessage={errorMessage}
+      />
+    );
+  }
 
   if (field.type === 'tag_picker') {
     return (
@@ -269,6 +451,10 @@ export default function DynamicSchemaForm ({
   values = {},
   onChangeValue,
   availableTags = [],
+  queuedFiles = [],
+  perAssetTitles = {},
+  onChangePerAssetTitle,
+  onBatchSetPerAssetTitles,
   validation
 }) {
   const [showOptional, setShowOptional] = useState(false);
@@ -282,6 +468,11 @@ export default function DynamicSchemaForm ({
   const requiredByTab = groupFieldsByTab(requiredFields);
   const optionalByTab = groupFieldsByTab(optionalFields);
   const errorsByProperty = (validation && validation.errorsByProperty) || {};
+
+  const isFullWidthField = (f) =>
+    f.type === 'tag_picker' ||
+    f.type === 'textarea' ||
+    (f.property === 'dc:title' && queuedFiles.length > 1);
 
   return (
     <Flex direction="column" gap="size-200">
@@ -341,17 +532,17 @@ export default function DynamicSchemaForm ({
               {tabFields.map((field) => (
                 <div
                   key={field.property}
-                  style={
-                    field.type === 'tag_picker' || field.type === 'textarea'
-                      ? { gridColumn: '1 / -1' }
-                      : undefined
-                  }
+                  style={isFullWidthField(field) ? { gridColumn: '1 / -1' } : undefined}
                 >
                   <SingleSchemaField
                     field={field}
                     value={values[field.property]}
                     onChange={(val) => onChangeValue(field.property, val)}
                     availableTags={availableTags}
+                    queuedFiles={queuedFiles}
+                    perAssetTitles={perAssetTitles}
+                    onChangePerAssetTitle={onChangePerAssetTitle}
+                    onBatchSetPerAssetTitles={onBatchSetPerAssetTitles}
                     errorMessage={errorsByProperty[field.property]}
                   />
                 </div>
@@ -391,17 +582,17 @@ export default function DynamicSchemaForm ({
                       {tabFields.map((field) => (
                         <div
                           key={field.property}
-                          style={
-                            field.type === 'tag_picker' || field.type === 'textarea'
-                              ? { gridColumn: '1 / -1' }
-                              : undefined
-                          }
+                          style={isFullWidthField(field) ? { gridColumn: '1 / -1' } : undefined}
                         >
                           <SingleSchemaField
                             field={field}
                             value={values[field.property]}
                             onChange={(val) => onChangeValue(field.property, val)}
                             availableTags={availableTags}
+                            queuedFiles={queuedFiles}
+                            perAssetTitles={perAssetTitles}
+                            onChangePerAssetTitle={onChangePerAssetTitle}
+                            onBatchSetPerAssetTitles={onBatchSetPerAssetTitles}
                             errorMessage={errorsByProperty[field.property]}
                           />
                         </div>

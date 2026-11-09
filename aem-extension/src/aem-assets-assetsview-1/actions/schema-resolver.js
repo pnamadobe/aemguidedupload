@@ -153,6 +153,34 @@ function extractDropdownOptions (fieldNode, prop, element) {
   return out
 }
 
+function extractRootTagInfo (fieldNode = {}) {
+  const rt = fieldNode.rootTag || fieldNode['granite:data']?.rootTag || null
+  const rawPath =
+    (rt && typeof rt === 'object' ? rt.path : (typeof rt === 'string' ? rt : '')) ||
+    fieldNode.rootPath ||
+    fieldNode.tagsPath ||
+    fieldNode.rootTagPath ||
+    ''
+  const cleanPath = String(rawPath || '').trim().replace(/\/+$/, '')
+  if (!cleanPath || cleanPath === '/content/cq:tags' || cleanPath === '/etc/tags') {
+    return null
+  }
+  // Convert /content/cq:tags/<ns>/<sub1>/<sub2> -> <ns>:<sub1>/<sub2>
+  const rel = cleanPath
+    .replace(/^\/content\/cq:tags\/?/, '')
+    .replace(/^\/etc\/tags\/?/, '')
+  const segs = rel.split('/').filter(Boolean)
+  if (!segs.length) return null
+  const derivedId = segs.length === 1 ? `${segs[0]}:` : `${segs[0]}:${segs.slice(1).join('/')}`
+  const id = (rt && typeof rt === 'object' && rt.id) ? String(rt.id) : derivedId
+  const name = (rt && typeof rt === 'object' && rt.name) ? String(rt.name) : segs.join(' / ')
+  return {
+    path: `/content/cq:tags/${segs.join('/')}`,
+    id,
+    name
+  }
+}
+
 /**
  * Parses an Assets View Metadata Form object (either from `/adobe/repository/content/dam/appdata/metadataforms/<name>`
  * or from `.infinity.json` JCR dump).
@@ -180,6 +208,7 @@ function parseAssetsViewForm (formObj) {
 
         const type = normalizeElementType(item.element, prop)
         const options = type === 'dropdown' ? extractDropdownOptions(item, prop, item.element) : []
+        const rootTag = type === 'tag_picker' ? extractRootTagInfo(item) : null
         // Skip bloated 90-locale language dropdown unless explicitly required
         if (prop === 'dc:language' && !item.required) continue
 
@@ -191,10 +220,12 @@ function parseAssetsViewForm (formObj) {
           tab: String(tabLabel || 'Basic').trim(),
           section: String(sectionHeader || '').trim(),
           type,
+          perAsset: prop === 'dc:title',
           required: isExplicitlyRequired,
           requiredSource: isExplicitlyRequired ? 'schema' : null,
           placeholder: String(item.placeholder || ''),
-          options
+          options,
+          ...(rootTag ? { rootTag } : {})
         })
       }
       if (item.fields) {
@@ -235,6 +266,7 @@ function parseAdminViewSchema (schemaObj) {
           seenProps.add(prop)
           const type = normalizeElementType(metaType || resType, prop)
           const options = type === 'dropdown' ? extractDropdownOptions(node, prop, metaType) : []
+          const rootTag = type === 'tag_picker' ? extractRootTagInfo(node) : null
           const isExplicitlyRequired =
             node.required === true ||
             node.required === 'true' ||
@@ -247,10 +279,12 @@ function parseAdminViewSchema (schemaObj) {
             tab: String(tabLabel || 'Basic').trim(),
             section: String(sectionHeader || '').trim(),
             type,
+            perAsset: prop === 'dc:title',
             required: isExplicitlyRequired,
             requiredSource: isExplicitlyRequired ? 'schema' : null,
             placeholder: String(node.emptyText || ''),
-            options
+            options,
+            ...(rootTag ? { rootTag } : {})
           })
         }
       }
@@ -662,6 +696,15 @@ async function resolveFolderSchema (author, token, folderPath) {
     finalFields = getDefaultFallbackFields()
   }
 
+  // 4. For any tag_picker field with a specific `rootTag`, fetch its scoped descendant tags
+  await Promise.all(
+    finalFields.map(async (f) => {
+      if (f.type === 'tag_picker' && f.rootTag && f.rootTag.path) {
+        f.scopedTags = await fetchTagsUnderRootPath(author, token, f.rootTag)
+      }
+    })
+  )
+
   const requiredFields = finalFields.filter((f) => f.required)
   const optionalFields = finalFields.filter((f) => !f.required)
   const naming = buildNamingTokensAndPattern(finalFields, slug)
@@ -683,33 +726,81 @@ async function resolveFolderSchema (author, token, folderPath) {
 }
 
 /**
- * Fetches AEM taxonomy tags from `/content/cq:tags.2.json` so the Tag Picker field in the
+ * Recursively collects descendant `cq:Tag` nodes under a specific `rootTag` path
+ * (e.g. `/content/cq:tags/sports/spurs/team-2025-26` or `/content/cq:tags/sport-category`).
+ */
+async function fetchTagsUnderRootPath (author, token, rootTag) {
+  if (!rootTag || !rootTag.path) return []
+  const cleanPath = String(rootTag.path).replace(/\/+$/, '')
+  const data = await fetchJsonSafe(`${author}${encodeDamPath(cleanPath)}.3.json`, token)
+  if (!data || typeof data !== 'object') return []
+
+  const rel = cleanPath.replace(/^\/content\/cq:tags\/?/, '')
+  const baseSegs = rel.split('/').filter(Boolean)
+  if (!baseSegs.length) return []
+  const nsKey = baseSegs[0]
+  const rootTitle = data['jcr:title'] || rootTag.name || baseSegs.join(' / ')
+  const tags = []
+
+  function walkTagTree (node, pathSegs, titleSegs) {
+    for (const [k, v] of Object.entries(node || {})) {
+      if (!v || typeof v !== 'object' || k.startsWith('jcr:') || k.startsWith('sling:') || k.startsWith('rep:')) continue
+      const primaryType = v['jcr:primaryType']
+      if (primaryType && primaryType !== 'cq:Tag') continue
+      const nextSegs = [...pathSegs, k]
+      const childTitle = v['jcr:title'] || k
+      const nextTitles = [...titleSegs, childTitle]
+      const tagId = `${nsKey}:${nextSegs.slice(1).join('/')}`
+      tags.push({
+        id: tagId,
+        label: nextTitles.join(' / '),
+        namespace: nsKey,
+        namespaceTitle: rootTitle,
+        title: childTitle
+      })
+      walkTagTree(v, nextSegs, nextTitles)
+    }
+  }
+
+  walkTagTree(data, baseSegs, [rootTitle])
+  return tags.sort((a, b) => a.label.localeCompare(b.label))
+}
+
+/**
+ * Fetches AEM taxonomy tags from `/content/cq:tags.3.json` so the Tag Picker field in the
  * Guided Upload modal can display and search real taxonomy tag IDs (`namespace:tag`).
  */
 async function fetchTaxonomyTags (author, token) {
-  const data = await fetchJsonSafe(`${author}/content/cq:tags.2.json`, token)
+  const data = await fetchJsonSafe(`${author}/content/cq:tags.3.json`, token)
   if (!data || typeof data !== 'object') {
     return []
   }
 
   const tags = []
-  for (const [nsKey, nsVal] of Object.entries(data)) {
-    if (!nsVal || typeof nsVal !== 'object' || nsKey.startsWith('jcr:') || nsKey.startsWith('rep:')) continue
-    const nsTitle = nsVal['jcr:title'] || nsKey
-    for (const [childKey, childVal] of Object.entries(nsVal)) {
-      if (!childVal || typeof childVal !== 'object' || childKey.startsWith('jcr:') || childKey.startsWith('sling:')) continue
+  function walkNamespace (node, nsKey, pathSegs, titleSegs) {
+    for (const [childKey, childVal] of Object.entries(node || {})) {
+      if (!childVal || typeof childVal !== 'object' || childKey.startsWith('jcr:') || childKey.startsWith('sling:') || childKey.startsWith('rep:')) continue
       const primaryType = childVal['jcr:primaryType']
       if (primaryType && primaryType !== 'cq:Tag') continue
       const childTitle = childVal['jcr:title'] || childKey
-      const tagId = `${nsKey}:${childKey}`
+      const nextSegs = [...pathSegs, childKey]
+      const nextTitles = [...titleSegs, childTitle]
+      const tagId = `${nsKey}:${nextSegs.join('/')}`
       tags.push({
         id: tagId,
-        label: `${nsTitle} / ${childTitle}`,
+        label: nextTitles.join(' / '),
         namespace: nsKey,
-        namespaceTitle: nsTitle,
+        namespaceTitle: titleSegs[0],
         title: childTitle
       })
+      walkNamespace(childVal, nsKey, nextSegs, nextTitles)
     }
+  }
+
+  for (const [nsKey, nsVal] of Object.entries(data)) {
+    if (!nsVal || typeof nsVal !== 'object' || nsKey.startsWith('jcr:') || nsKey.startsWith('rep:')) continue
+    const nsTitle = nsVal['jcr:title'] || nsKey
+    walkNamespace(nsVal, nsKey, [], [nsTitle])
   }
 
   return tags.sort((a, b) => a.label.localeCompare(b.label))
@@ -718,11 +809,13 @@ async function fetchTaxonomyTags (author, token) {
 module.exports = {
   normalizePropName,
   normalizeElementType,
+  extractRootTagInfo,
   parseAssetsViewForm,
   parseAdminViewSchema,
   resolveFieldRequirements,
   buildNamingTokensAndPattern,
   discoverFolderSchemaAssignment,
   resolveFolderSchema,
+  fetchTagsUnderRootPath,
   fetchTaxonomyTags
 }

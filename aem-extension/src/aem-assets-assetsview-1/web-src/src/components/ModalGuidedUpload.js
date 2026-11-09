@@ -19,7 +19,7 @@ import {
 
 import { extensionId, HANDOFF_MESSAGE_NS, STORAGE_KEY_CTX } from './Constants';
 import FolderDropzone, { shouldIgnoreFile } from './FolderDropzone';
-import DynamicSchemaForm from './DynamicSchemaForm';
+import DynamicSchemaForm, { humanTitleFromFileName } from './DynamicSchemaForm';
 import { validateMetadataValues } from './ValidationRules';
 import { computeBatchNamingPlan } from './NamingEngine';
 import actionWebInvoke, { uploadBinaryToPresignedUris } from '../utils';
@@ -267,6 +267,7 @@ export default function ModalGuidedUpload () {
   const [schema, setSchema] = useState(() => createClientFallbackSchema(initialCtx.folderPath));
   const [availableTags, setAvailableTags] = useState([]);
   const [metadataValues, setMetadataValues] = useState({});
+  const [perAssetTitles, setPerAssetTitles] = useState({});
 
   // Naming state
   const [namingPattern, setNamingPattern] = useState('{folder}_{origName}_{seq}');
@@ -360,6 +361,17 @@ export default function ModalGuidedUpload () {
           setQueuedFiles((prev) => {
             const existingKeys = new Set(prev.map((p) => `${p.relativePath}|${p.size}`));
             const fresh = mapped.filter((m) => !existingKeys.has(`${m.relativePath}|${m.size}`));
+            if (fresh.length > 0) {
+              setPerAssetTitles((pt) => {
+                const next = { ...pt };
+                for (const item of fresh) {
+                  if (!next[item.id]) next[item.id] = humanTitleFromFileName(item.name) || item.name;
+                }
+                return next;
+              });
+              const firstTitle = humanTitleFromFileName(fresh[0].name) || fresh[0].name;
+              setMetadataValues((mv) => (mv['dc:title'] ? mv : { ...mv, 'dc:title': firstTitle }));
+            }
             return [...prev, ...fresh];
           });
           setHandoffSource('chrome-extension');
@@ -454,10 +466,18 @@ export default function ModalGuidedUpload () {
     setQueuedFiles((prev) => {
       const existingKeys = new Set(prev.map((p) => `${p.relativePath}|${p.size}`));
       const fresh = mapped.filter((m) => !existingKeys.has(`${m.relativePath}|${m.size}`));
-      // Auto-populate dc:title from first file if empty
-      if (prev.length === 0 && fresh.length > 0) {
-        const firstStem = fresh[0].name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ');
-        setMetadataValues((mv) => (mv['dc:title'] ? mv : { ...mv, 'dc:title': firstStem }));
+      if (fresh.length > 0) {
+        setPerAssetTitles((pt) => {
+          const next = { ...pt };
+          for (const item of fresh) {
+            if (!next[item.id]) next[item.id] = humanTitleFromFileName(item.name) || item.name;
+          }
+          return next;
+        });
+        if (prev.length === 0) {
+          const firstTitle = humanTitleFromFileName(fresh[0].name) || fresh[0].name;
+          setMetadataValues((mv) => (mv['dc:title'] ? mv : { ...mv, 'dc:title': firstTitle }));
+        }
       }
       return [...prev, ...fresh];
     });
@@ -465,10 +485,16 @@ export default function ModalGuidedUpload () {
 
   const handleRemoveFile = (id) => {
     setQueuedFiles((prev) => prev.filter((f) => f.id !== id));
+    setPerAssetTitles((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
   };
 
   const handleClearFiles = () => {
     setQueuedFiles([]);
+    setPerAssetTitles({});
     setManualNameOverrides({});
     setHandoffSource(null);
   };
@@ -480,9 +506,19 @@ export default function ModalGuidedUpload () {
     }));
   };
 
+  const handleChangePerAssetTitle = (fileId, titleVal) => {
+    setPerAssetTitles((prev) => ({
+      ...prev,
+      [fileId]: titleVal
+    }));
+  };
+
   const validation = useMemo(
-    () => validateMetadataValues(metadataValues, schema ? schema.allFields : []),
-    [metadataValues, schema]
+    () => validateMetadataValues(metadataValues, schema ? schema.allFields : [], {
+      queuedFiles,
+      perAssetTitles
+    }),
+    [metadataValues, schema, queuedFiles, perAssetTitles]
   );
 
   const namingPlan = useMemo(
@@ -604,14 +640,18 @@ export default function ModalGuidedUpload () {
         aemAuthorUrl,
         ...(token ? { userToken: token } : {}),
         sharedMetadata: metadataValues,
-        files: initiatedFiles.map((desc) => ({
-          clientId: desc.clientId,
-          fileName: desc.fileName,
-          targetFolder: desc.targetFolder,
-          mimeType: desc.mimeType,
-          fileSize: desc.fileSize,
-          uploadToken: desc.uploadToken
-        }))
+        files: initiatedFiles.map((desc) => {
+          const perFileTitle = perAssetTitles[desc.clientId];
+          return {
+            clientId: desc.clientId,
+            fileName: desc.fileName,
+            targetFolder: desc.targetFolder,
+            mimeType: desc.mimeType,
+            fileSize: desc.fileSize,
+            uploadToken: desc.uploadToken,
+            metadata: perFileTitle ? { 'dc:title': perFileTitle } : {}
+          };
+        })
       };
 
       const completeRes = await actionWebInvoke(actionUrl, headers, completePayload);
@@ -768,6 +808,10 @@ export default function ModalGuidedUpload () {
                   values={metadataValues}
                   onChangeValue={handleChangeMetadata}
                   availableTags={availableTags}
+                  queuedFiles={queuedFiles}
+                  perAssetTitles={perAssetTitles}
+                  onChangePerAssetTitle={handleChangePerAssetTitle}
+                  onBatchSetPerAssetTitles={setPerAssetTitles}
                   validation={validation}
                 />
               )}

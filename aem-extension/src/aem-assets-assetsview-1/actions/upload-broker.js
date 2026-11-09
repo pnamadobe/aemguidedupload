@@ -204,6 +204,16 @@ function normalizeMetadataForAem (rawMetadata = {}) {
       continue
     }
 
+    // If a custom tag_picker field (e.g. product:sportCategory, xdm:playerName, gartner:tags)
+    // holds an array of taxonomy tag IDs (`namespace:tag`), write the custom property AND
+    // also merge valid taxonomy tag IDs into `cq:tags` so AEM's tag index picks them up.
+    if (Array.isArray(rawVal) && rawVal.every((v) => typeof v === 'string' && /^[a-z0-9_-]+:/i.test(v))) {
+      const cleanTags = rawVal.map((v) => v.trim()).filter(Boolean)
+      out[key] = cleanTags
+      out['cq:tags'] = [...new Set([...(out['cq:tags'] || []), ...cleanTags])]
+      continue
+    }
+
     if (multiValProps.has(key)) {
       const arr = Array.isArray(rawVal)
         ? rawVal.map((v) => String(v).trim()).filter(Boolean)

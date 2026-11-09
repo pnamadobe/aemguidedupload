@@ -258,6 +258,45 @@ describe('2. Metadata & Rights Validation Engine', () => {
     expect(res.valid).toBe(false);
     expect(res.errorsByProperty['drm:contractNumber']).toMatch(/Contract Number/);
   });
+
+  test('validates per-asset dc:title across multiple queued files and enforces tag rootTag scope', () => {
+    const fields = [
+      { property: 'dc:title', label: 'Title', required: true, type: 'text', perAsset: true },
+      {
+        property: 'xdm:playerName',
+        label: 'Players Featured',
+        required: true,
+        type: 'tag_picker',
+        rootTag: {
+          path: '/content/cq:tags/sports/spurs/team-2025-26',
+          id: 'sports:spurs/team-2025-26',
+          name: 'Sports : Spurs / Team 2025-26'
+        }
+      }
+    ];
+    const files = [
+      { id: 'f1', name: 'one.jpg' },
+      { id: 'f2', name: 'two.jpg' }
+    ];
+
+    // Missing title on f2 + out-of-scope tag on xdm:playerName
+    const bad = validateMetadataValues(
+      { 'xdm:playerName': ['region:amer'] },
+      fields,
+      { queuedFiles: files, perAssetTitles: { f1: 'Asset One', f2: '' } }
+    );
+    expect(bad.valid).toBe(false);
+    expect(bad.errorsByProperty['dc:title']).toMatch(/1 of 2 missing/);
+    expect(bad.errorsByProperty['xdm:playerName']).toMatch(/must be under root/);
+
+    // Both files have titles + tag is under sports:spurs/team-2025-26
+    const good = validateMetadataValues(
+      { 'xdm:playerName': ['sports:spurs/team-2025-26/de-aaron-fox'] },
+      fields,
+      { queuedFiles: files, perAssetTitles: { f1: 'Asset One', f2: 'Asset Two' } }
+    );
+    expect(good.valid).toBe(true);
+  });
 });
 
 describe('3. Token Auto-Naming & Subfolder Preservation Engine', () => {

@@ -3,8 +3,10 @@
  *
  * Enforces:
  *   1. All fields marked `required: true` from the folder's resolved AEM Metadata Schema / Form
- *   2. Built-in rights/date sanity checks (e.g., expiration dates cannot be in the past)
- *   3. Pluggable custom cross-field validation rules (`registerValidationRule`) for future enhancements
+ *      (including per-asset `dc:title` validation when multiple files are queued)
+ *   2. Tag root scope enforcement (`field.rootTag`) when a tag_picker field specifies a tag root
+ *   3. Built-in rights/date sanity checks (e.g., expiration dates cannot be in the past)
+ *   4. Pluggable custom cross-field validation rules (`registerValidationRule`) for future enhancements
  */
 
 const customRules = [];
@@ -38,11 +40,14 @@ const EXPIRATION_PROPERTIES = new Set([
  *
  * @param {object} values - Map of `{ [property]: value }`
  * @param {Array} schemaFields - Array of field descriptors from `schema-resolver`
+ * @param {object} [options] - `{ queuedFiles, perAssetTitles }` for per-asset field checks
  * @returns {{ valid: boolean, errors: Array<{ property: string, label: string, message: string }>, errorsByProperty: object }}
  */
-function validateMetadataValues (values = {}, schemaFields = []) {
+function validateMetadataValues (values = {}, schemaFields = [], options = {}) {
   const errors = [];
   const errorsByProperty = {};
+  const queuedFiles = Array.isArray(options.queuedFiles) ? options.queuedFiles : [];
+  const perAssetTitles = options.perAssetTitles || {};
 
   const addError = (property, label, message) => {
     const err = { property, label, message };
@@ -57,6 +62,23 @@ function validateMetadataValues (values = {}, schemaFields = []) {
   for (const field of schemaFields) {
     const val = values[field.property];
 
+    // Special handling for per-asset `dc:title` when multiple files are queued
+    if (field.property === 'dc:title' && queuedFiles.length > 1) {
+      if (field.required) {
+        const missingCount = queuedFiles.filter(
+          (f) => isValueEmpty(perAssetTitles[f.id]) && isValueEmpty(val)
+        ).length;
+        if (missingCount > 0) {
+          addError(
+            field.property,
+            field.label,
+            `Title (dc:title) is required for each asset (${missingCount} of ${queuedFiles.length} missing)`
+          );
+        }
+      }
+      continue;
+    }
+
     // 1. Check required fields from the folder's schema
     if (field.required && isValueEmpty(val)) {
       addError(
@@ -67,7 +89,24 @@ function validateMetadataValues (values = {}, schemaFields = []) {
       continue;
     }
 
-    // 2. Date sanity check: expiration dates must not be in the past
+    // 2. Check tag_picker rootTag constraint if specified on the field
+    if (!isValueEmpty(val) && field.type === 'tag_picker' && field.rootTag && field.rootTag.id) {
+      const rootPrefix = String(field.rootTag.id);
+      const selected = Array.isArray(val) ? val : [String(val)];
+      const invalidTag = selected.find((tagId) => {
+        const s = String(tagId || '').trim();
+        return s && !s.startsWith(rootPrefix);
+      });
+      if (invalidTag) {
+        addError(
+          field.property,
+          field.label,
+          `Tag "${invalidTag}" must be under root "${field.rootTag.name || rootPrefix}" (${rootPrefix}*)`
+        );
+      }
+    }
+
+    // 3. Date sanity check: expiration dates must not be in the past
     if (!isValueEmpty(val) && EXPIRATION_PROPERTIES.has(field.property)) {
       const dateStr = String(val).slice(0, 10);
       if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr) && dateStr < todayIso) {
@@ -80,10 +119,10 @@ function validateMetadataValues (values = {}, schemaFields = []) {
     }
   }
 
-  // 3. Run any pluggable custom rules
+  // 4. Run any pluggable custom rules
   for (const ruleFn of customRules) {
     try {
-      const extra = ruleFn(values, schemaFields) || [];
+      const extra = ruleFn(values, schemaFields, options) || [];
       for (const item of extra) {
         if (item && item.property && item.message) {
           addError(item.property, item.label || item.property, item.message);
