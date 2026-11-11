@@ -868,44 +868,39 @@ export default function ModalGuidedUpload () {
                     </tbody>
                   </table>
                 </View>
-                <Flex justifyContent="space-between" alignItems="center" wrap gap="size-125" marginTop="size-100">
-                  <Text UNSAFE_style={{ fontSize: '12px', opacity: 0.8 }}>
-                    Closing this dialog will automatically refresh the AEM Assets View folder contents.
-                  </Text>
-                  <Flex gap="size-125" wrap>
-                    <Button
-                      variant="secondary"
-                      onPress={() => {
-                        setCompletedResult(null);
-                        handleClearFiles();
-                        setStep(1);
-                      }}
-                    >
-                      Upload More Assets
-                    </Button>
-                    {(() => {
-                      const subfolders = [...new Set(
-                        (completedResult.assets || [])
-                          .map((a) => a.targetFolder)
-                          .filter((tf) => tf && tf !== folderPath)
-                      )];
-                      if (subfolders.length === 1) {
-                        const leaf = subfolders[0].split('/').pop();
-                        return (
-                          <Button
-                            variant="primary"
-                            onPress={() => triggerFolderRefreshAndClose(subfolders[0])}
-                          >
-                            {`Open Subfolder (${leaf})`}
-                          </Button>
-                        );
-                      }
-                      return null;
-                    })()}
-                    <Button variant="cta" onPress={() => triggerFolderRefreshAndClose(folderPath)}>
-                      Done & Refresh Folder
-                    </Button>
-                  </Flex>
+                <Flex justifyContent="end" gap="size-125" wrap marginTop="size-100">
+                  <Button
+                    variant="secondary"
+                    onPress={() => {
+                      setCompletedResult(null);
+                      handleClearFiles();
+                      setStep(1);
+                    }}
+                  >
+                    Upload More Assets
+                  </Button>
+                  {(() => {
+                    const subfolders = [...new Set(
+                      (completedResult.assets || [])
+                        .map((a) => a.targetFolder)
+                        .filter((tf) => tf && tf !== folderPath)
+                    )];
+                    if (subfolders.length === 1) {
+                      const leaf = subfolders[0].split('/').pop();
+                      return (
+                        <Button
+                          variant="primary"
+                          onPress={() => triggerFolderRefreshAndClose(subfolders[0])}
+                        >
+                          {`Open Subfolder (${leaf})`}
+                        </Button>
+                      );
+                    }
+                    return null;
+                  })()}
+                  <Button variant="cta" onPress={() => triggerFolderRefreshAndClose(folderPath)}>
+                    Done
+                  </Button>
                 </Flex>
               </Flex>
             </View>
