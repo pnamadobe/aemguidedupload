@@ -8,8 +8,15 @@ import {
   ButtonGroup,
   Checkbox,
   ActionButton,
-  Divider
+  Divider,
+  StatusLight
 } from '@adobe/react-spectrum';
+import UploadToCloud from '@spectrum-icons/workflow/UploadToCloud';
+import FolderAdd from '@spectrum-icons/workflow/FolderAdd';
+import Folder from '@spectrum-icons/workflow/Folder';
+import Document from '@spectrum-icons/workflow/Document';
+import Close from '@spectrum-icons/workflow/Close';
+import Delete from '@spectrum-icons/workflow/Delete';
 import { sanitizeSubfolderPath } from './NamingEngine';
 
 const IGNORED_OS_FILES = new Set([
@@ -209,11 +216,13 @@ export default function FolderDropzone ({
   return (
     <Flex direction="column" gap="size-200">
       {handoffSource && (
-        <View backgroundColor="positive" padding="size-125" borderRadius="regular">
-          <Text>
-            <b>Intercepted Grid Drop:</b> Loaded {files.length} file{files.length === 1 ? '' : 's'} (preserving folder structure) from AEM Assets View drag-and-drop. Complete metadata and naming rules below to commit.
-          </Text>
-        </View>
+        <div className="gu-card-subtle">
+          <Flex alignItems="center" justifyContent="space-between" wrap gap="size-100">
+            <StatusLight variant="positive">
+              Loaded {files.length} asset{files.length === 1 ? '' : 's'} from drag-and-drop (folder hierarchy preserved)
+            </StatusLight>
+          </Flex>
+        </div>
       )}
 
       <div
@@ -242,49 +251,59 @@ export default function FolderDropzone ({
         />
 
         <Flex direction="column" alignItems="center" gap="size-125">
+          <UploadToCloud size="L" UNSAFE_style={{ opacity: 0.7 }} />
           <Heading level={4} margin={0}>
             {scanningFolders
               ? 'Scanning folder hierarchy…'
-              : 'Drag and drop files or entire folders here'}
+              : 'Drag and drop files or folders to upload'}
           </Heading>
-          <Text>
-            Nested folder hierarchies are automatically preserved under <code>{baseFolder}</code>
+          <Text UNSAFE_style={{ fontSize: '12.5px', opacity: 0.75 }}>
+            Subfolder structures are automatically preserved under <b>{baseFolder}</b>
           </Text>
-          <ButtonGroup marginTop="size-100">
+          <ButtonGroup marginTop="size-125">
             <Button
               variant="primary"
               onPress={() => fileInputRef.current && fileInputRef.current.click()}
             >
-              Select Files
+              <Document size="S" />
+              <Text>Browse Files</Text>
             </Button>
             <Button
               variant="secondary"
               onPress={() => folderInputRef.current && folderInputRef.current.click()}
             >
-              Select Folder Tree
+              <FolderAdd size="S" />
+              <Text>Browse Folder</Text>
             </Button>
           </ButtonGroup>
         </Flex>
       </div>
 
       {files.length > 0 && (
-        <View borderWidth="thin" borderColor="dark" borderRadius="regular" padding="size-200">
+        <div className="gu-card">
           <Flex direction="column" gap="size-150">
-            <Flex justifyContent="space-between" alignItems="center" wrap>
-              <Text>
-                <b>{files.length} file{files.length === 1 ? '' : 's'} queued</b> ({formatBytes(totalBytes)}) across <b>{subfolderKeys.length}</b> destination folder{subfolderKeys.length === 1 ? '' : 's'}
-              </Text>
+            <Flex justifyContent="space-between" alignItems="center" wrap gap="size-100">
+              <Flex alignItems="center" gap="size-100">
+                <Text UNSAFE_style={{ fontWeight: 600 }}>
+                  {files.length} asset{files.length === 1 ? '' : 's'} selected
+                </Text>
+                <span className="gu-badge-neutral">{formatBytes(totalBytes)}</span>
+                {subfolderKeys.length > 1 && (
+                  <span className="gu-badge-neutral">{subfolderKeys.length} folders</span>
+                )}
+              </Flex>
               <Flex alignItems="center" gap="size-150">
                 {hasSubfolders && (
                   <Checkbox
                     isSelected={normalizeSubfolders}
                     onChange={onToggleNormalizeSubfolders}
                   >
-                    Normalize subfolder names to kebab-case
+                    Normalize folder names
                   </Checkbox>
                 )}
                 <ActionButton isQuiet onPress={onClearFiles}>
-                  Clear All
+                  <Delete size="S" />
+                  <Text>Clear All</Text>
                 </ActionButton>
               </Flex>
             </Flex>
@@ -293,60 +312,57 @@ export default function FolderDropzone ({
 
             {/* Folder Structure Preview */}
             <View maxHeight="size-3000" overflow="auto">
-              <Flex direction="column" gap="size-125">
+              <Flex direction="column" gap="size-100">
                 {subfolderKeys.map((subKey) => {
                   const groupItems = folderGroups[subKey];
                   const destFolder = subKey === '(Current Folder Root)'
                     ? baseFolder
                     : `${baseFolder}/${subKey}`;
                   return (
-                    <View
-                      key={subKey}
-                      backgroundColor="gray-100"
-                      padding="size-125"
-                      borderRadius="regular"
-                    >
+                    <div key={subKey} className="gu-card-subtle">
                       <Flex direction="column" gap="size-75">
                         <Flex justifyContent="space-between" alignItems="center">
-                          <Text>
-                            <b>📁 {destFolder}</b>
-                            {subKey !== '(Current Folder Root)' && (
-                              <span style={{ marginLeft: '8px', fontSize: '11px', opacity: 0.75 }}>
-                                (subfolder will be ensured on commit)
-                              </span>
-                            )}
-                          </Text>
-                          <Text>{groupItems.length} file{groupItems.length === 1 ? '' : 's'}</Text>
-                        </Flex>
-                        {groupItems.map((f) => (
-                          <Flex
-                            key={f.id}
-                            justifyContent="space-between"
-                            alignItems="center"
-                            marginStart="size-200"
-                          >
-                            <Text>
-                              📄 {f.name}{' '}
-                              <span style={{ opacity: 0.65, fontSize: '11.5px' }}>
-                                ({formatBytes(f.size)})
-                              </span>
+                          <Flex alignItems="center" gap="size-75">
+                            <Folder size="S" />
+                            <Text UNSAFE_style={{ fontWeight: 600, fontSize: '12.5px' }}>
+                              {destFolder}
                             </Text>
-                            <ActionButton
-                              isQuiet
-                              onPress={() => onRemoveFile && onRemoveFile(f.id)}
-                            >
-                              ✕
-                            </ActionButton>
+                            {subKey !== '(Current Folder Root)' && (
+                              <span className="gu-badge-neutral">New Subfolder</span>
+                            )}
                           </Flex>
-                        ))}
+                          <Text UNSAFE_style={{ fontSize: '12px', opacity: 0.7 }}>
+                            {groupItems.length} item{groupItems.length === 1 ? '' : 's'}
+                          </Text>
+                        </Flex>
+                        <Flex direction="column" gap="size-25" marginStart="size-200">
+                          {groupItems.map((f) => (
+                            <div key={f.id} className="gu-file-row">
+                              <Flex alignItems="center" gap="size-100">
+                                <Document size="XS" />
+                                <Text UNSAFE_style={{ fontSize: '12.5px' }}>{f.name}</Text>
+                                <Text UNSAFE_style={{ opacity: 0.6, fontSize: '11.5px' }}>
+                                  {formatBytes(f.size)}
+                                </Text>
+                              </Flex>
+                              <ActionButton
+                                isQuiet
+                                aria-label={`Remove ${f.name}`}
+                                onPress={() => onRemoveFile && onRemoveFile(f.id)}
+                              >
+                                <Close size="XS" />
+                              </ActionButton>
+                            </div>
+                          ))}
+                        </Flex>
                       </Flex>
-                    </View>
+                    </div>
                   );
                 })}
               </Flex>
             </View>
           </Flex>
-        </View>
+        </div>
       )}
     </Flex>
   );

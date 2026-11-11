@@ -6,12 +6,16 @@ import {
   Heading,
   TextField,
   TextArea,
+  SearchField,
   Picker,
   Item,
   Checkbox,
   ActionButton,
-  Divider
+  Divider,
+  StatusLight
 } from '@adobe/react-spectrum';
+import ChevronDown from '@spectrum-icons/workflow/ChevronDown';
+import ChevronUp from '@spectrum-icons/workflow/ChevronUp';
 
 export function humanTitleFromFileName (fileName = '') {
   return String(fileName || '')
@@ -43,10 +47,10 @@ function PerAssetTitleField ({
 
     return (
       <TextField
-        label={`${field.label} (${field.property})`}
+        label={field.label}
         isRequired={field.required}
-        placeholder="Leave blank to let AEM AI automatically generate the title"
-        description="When left blank, AEM's built-in AI metadata service automatically generates a descriptive title on upload."
+        placeholder="Leave blank for AI-generated title"
+        description="When left blank, AEM automatically generates a descriptive title during processing."
         value={effectiveVal || ''}
         onChange={(v) => {
           onChangeSingleValue(v);
@@ -80,24 +84,23 @@ function PerAssetTitleField ({
   };
 
   return (
-    <View backgroundColor="gray-75" padding="size-150" borderRadius="regular">
+    <div className="gu-card-subtle">
       <Flex direction="column" gap="size-125">
         <Flex justifyContent="space-between" alignItems="center" wrap gap="size-100">
           <Flex direction="column" gap="size-25">
             <Flex alignItems="center" gap="size-75">
-              <Text>
-                <b>{field.label} — Per-Asset Titles ({queuedFiles.length} assets)</b>{' '}
-                {field.required && <span style={{ color: '#c9252d' }}>*</span>}
+              <Text UNSAFE_style={{ fontWeight: 600 }}>
+                {field.label} ({queuedFiles.length} assets)
+                {field.required && <span style={{ color: '#c9252d', marginLeft: '4px' }}>*</span>}
               </Text>
-              <span style={{ fontSize: '11px', opacity: 0.65 }}>({field.property})</span>
             </Flex>
-            <Text UNSAFE_style={{ fontSize: '11.5px', opacity: 0.8 }}>
-              Leave blank to let AEM AI automatically generate a descriptive title for each asset on upload.
+            <Text UNSAFE_style={{ fontSize: '11.5px', opacity: 0.75 }}>
+              Leave blank to let AEM automatically generate a descriptive title for each asset on upload.
             </Text>
           </Flex>
           <Flex gap="size-75" alignItems="end" wrap>
             <TextField
-              label="Optional Prefix"
+              label="Title Prefix"
               placeholder="e.g. Winter 2026"
               value={prefixInput}
               onChange={setPrefixInput}
@@ -106,18 +109,18 @@ function PerAssetTitleField ({
             <ActionButton onPress={autoFillFromNames}>
               {prefixInput.trim() ? 'Apply Prefix + Filename' : 'Fill from Filenames'}
             </ActionButton>
-            <ActionButton onPress={clearAllToUseAi}>
-              Use AEM AI Title (Clear)
+            <ActionButton isQuiet onPress={clearAllToUseAi}>
+              Clear (Use AI Title)
             </ActionButton>
           </Flex>
         </Flex>
 
-        <View maxHeight="size-2400" overflow="auto" backgroundColor="gray-50" padding="size-100" borderRadius="regular">
+        <View maxHeight="size-2400" overflow="auto">
           <table className="gu-table">
             <thead>
               <tr>
-                <th style={{ width: '42%' }}>Queued File</th>
-                <th>Asset Title (<code>dc:title</code>) {field.required ? '*' : '(Optional — blank uses AEM AI)'}</th>
+                <th style={{ width: '42%' }}>Asset File</th>
+                <th>Title {field.required ? '*' : '(Optional — blank uses AI title)'}</th>
               </tr>
             </thead>
             <tbody>
@@ -126,22 +129,14 @@ function PerAssetTitleField ({
                 const isMissing = field.required && !currentTitle.trim();
                 return (
                   <tr key={f.id}>
-                    <td>
-                      <code>{f.relativePath || f.name}</code>
-                    </td>
+                    <td>{f.relativePath || f.name}</td>
                     <td>
                       <input
                         type="text"
+                        className={`gu-inline-input ${isMissing ? 'is-invalid' : ''}`}
                         value={currentTitle}
-                        placeholder="Leave blank for AEM AI-generated title..."
+                        placeholder="Leave blank for AI-generated title…"
                         onChange={(e) => onChangePerAssetTitle(f.id, e.target.value)}
-                        style={{
-                          width: '100%',
-                          padding: '5px 8px',
-                          borderRadius: '4px',
-                          border: isMissing ? '1px solid #c9252d' : '1px solid #8e8e8e',
-                          fontSize: '12.5px'
-                        }}
                       />
                     </td>
                   </tr>
@@ -152,12 +147,12 @@ function PerAssetTitleField ({
         </View>
 
         {errorMessage && (
-          <Text UNSAFE_style={{ color: '#c9252d', fontSize: '12px' }}>
-            ✖ {errorMessage}
+          <Text UNSAFE_style={{ color: '#d7373f', fontSize: '12px' }}>
+            {errorMessage}
           </Text>
         )}
       </Flex>
-    </View>
+    </div>
   );
 }
 
@@ -168,8 +163,6 @@ function TagPickerField ({ field, value = [], onChange, availableTags = [], erro
   const rootTag = field.rootTag || null;
   const rootPrefix = rootTag && rootTag.id ? String(rootTag.id) : '';
 
-  // Respect `rootTag` when specified on the schema field: use `field.scopedTags` if fetched,
-  // or filter `availableTags` by `rootPrefix`.
   const candidatePool = (Array.isArray(field.scopedTags) && field.scopedTags.length > 0)
     ? field.scopedTags
     : (rootPrefix
@@ -200,62 +193,33 @@ function TagPickerField ({ field, value = [], onChange, availableTags = [], erro
 
   return (
     <View>
-      <Flex direction="column" gap="size-75">
-        <Flex alignItems="center" gap="size-100" wrap>
-          <Text>
-            <b>{field.label}</b> {field.required && <span style={{ color: '#c9252d' }}>*</span>}
+      <Flex direction="column" gap="size-100">
+        <Flex alignItems="center" justifyContent="space-between" wrap gap="size-100">
+          <Text UNSAFE_style={{ fontSize: '12px', fontWeight: 500, opacity: 0.85 }}>
+            {field.label}
+            {field.required && <span style={{ color: '#d7373f', marginLeft: '4px' }}>*</span>}
           </Text>
-          <span style={{ fontSize: '11px', opacity: 0.65 }}>({field.property})</span>
           {rootTag && (
-            <span className="gu-chip" title={`Tag root path: ${rootTag.path}`}>
-              Scoped to Root: {rootTag.name || rootTag.id} ({candidatePool.length} tags)
+            <span className="gu-badge-neutral">
+              {rootTag.name || rootTag.id} ({candidatePool.length})
             </span>
           )}
         </Flex>
 
-        {selectedIds.length > 0 && (
-          <Flex wrap gap="size-75">
-            {selectedIds.map((tagId) => {
-              const hit =
-                candidatePool.find((t) => t.id === tagId) ||
-                availableTags.find((t) => t.id === tagId);
-              return (
-                <span key={tagId} className="gu-chip">
-                  {hit ? hit.label : tagId}
-                  <button
-                    type="button"
-                    onClick={() => removeTag(tagId)}
-                    style={{
-                      border: 0,
-                      background: 'transparent',
-                      cursor: 'pointer',
-                      fontWeight: 700,
-                      color: 'inherit',
-                      padding: 0
-                    }}
-                  >
-                    ×
-                  </button>
-                </span>
-              );
-            })}
-          </Flex>
-        )}
-
-        <Flex gap="size-100" wrap alignItems="end">
-          <TextField
-            label={rootTag ? `Filter "${rootTag.name}" Tags` : 'Filter AEM Taxonomy Tags'}
-            placeholder="Search existing tags..."
+        <Flex gap="size-125" wrap alignItems="end">
+          <SearchField
+            aria-label={`Search ${field.label}`}
+            placeholder="Filter tags…"
             value={filterText}
             onChange={setFilterText}
             width="size-3000"
           />
           <Picker
-            label="Select Taxonomy Tag"
+            aria-label={`Select ${field.label}`}
             placeholder={
               filteredTags.length > 0
-                ? `Choose from ${candidatePool.length} existing tag(s)...`
-                : 'No matching taxonomy tags'
+                ? `Select from ${candidatePool.length} tag${candidatePool.length === 1 ? '' : 's'}…`
+                : 'No matching tags'
             }
             isDisabled={filteredTags.length === 0}
             items={filteredTags}
@@ -268,9 +232,32 @@ function TagPickerField ({ field, value = [], onChange, availableTags = [], erro
           </Picker>
         </Flex>
 
+        {selectedIds.length > 0 && (
+          <Flex wrap gap="size-75" marginTop="size-25">
+            {selectedIds.map((tagId) => {
+              const hit =
+                candidatePool.find((t) => t.id === tagId) ||
+                availableTags.find((t) => t.id === tagId);
+              return (
+                <span key={tagId} className="gu-chip">
+                  {hit ? hit.label : tagId}
+                  <button
+                    type="button"
+                    className="gu-chip-remove"
+                    aria-label={`Remove ${hit ? hit.label : tagId}`}
+                    onClick={() => removeTag(tagId)}
+                  >
+                    ×
+                  </button>
+                </span>
+              );
+            })}
+          </Flex>
+        )}
+
         {errorMessage && (
-          <Text UNSAFE_style={{ color: '#c9252d', fontSize: '12px' }}>
-            ✖ {errorMessage}
+          <Text UNSAFE_style={{ color: '#d7373f', fontSize: '12px' }}>
+            {errorMessage}
           </Text>
         )}
       </Flex>
@@ -289,7 +276,7 @@ function SingleSchemaField ({
   onBatchSetPerAssetTitles,
   errorMessage
 }) {
-  const labelWithProperty = `${field.label} (${field.property})`;
+  const cleanLabel = field.label || field.property;
 
   if (field.property === 'dc:title') {
     return (
@@ -322,9 +309,9 @@ function SingleSchemaField ({
     return (
       <Flex direction="column" gap="size-50">
         <Picker
-          label={labelWithProperty}
+          label={cleanLabel}
           isRequired={field.required}
-          placeholder={field.placeholder || `Select ${field.label}`}
+          placeholder={field.placeholder || `Select ${cleanLabel}`}
           selectedKey={value || null}
           onSelectionChange={(key) => onChange(key ? String(key) : '')}
           validationState={errorMessage ? 'invalid' : undefined}
@@ -335,8 +322,8 @@ function SingleSchemaField ({
           ))}
         </Picker>
         {errorMessage && (
-          <Text UNSAFE_style={{ color: '#c9252d', fontSize: '12px' }}>
-            ✖ {errorMessage}
+          <Text UNSAFE_style={{ color: '#d7373f', fontSize: '12px' }}>
+            {errorMessage}
           </Text>
         )}
       </Flex>
@@ -346,7 +333,7 @@ function SingleSchemaField ({
   if (field.type === 'textarea') {
     return (
       <TextArea
-        label={labelWithProperty}
+        label={cleanLabel}
         isRequired={field.required}
         placeholder={field.placeholder || ''}
         value={value || ''}
@@ -361,7 +348,7 @@ function SingleSchemaField ({
   if (field.type === 'datepicker') {
     return (
       <TextField
-        label={`${labelWithProperty} [YYYY-MM-DD]`}
+        label={cleanLabel}
         type="date"
         isRequired={field.required}
         placeholder="YYYY-MM-DD"
@@ -377,7 +364,7 @@ function SingleSchemaField ({
   if (field.type === 'number') {
     return (
       <TextField
-        label={labelWithProperty}
+        label={cleanLabel}
         type="number"
         isRequired={field.required}
         placeholder={field.placeholder || '0'}
@@ -396,7 +383,7 @@ function SingleSchemaField ({
         isSelected={Boolean(value)}
         onChange={onChange}
       >
-        {labelWithProperty}
+        {cleanLabel}
       </Checkbox>
     );
   }
@@ -405,9 +392,10 @@ function SingleSchemaField ({
     const strVal = Array.isArray(value) ? value.join(', ') : (value || '');
     return (
       <TextField
-        label={`${labelWithProperty} (comma-separated)`}
+        label={cleanLabel}
+        description="Separate multiple values with commas"
         isRequired={field.required}
-        placeholder={field.placeholder || 'value1, value2, value3'}
+        placeholder={field.placeholder || 'value1, value2'}
         value={strVal}
         onChange={(v) => onChange(v)}
         validationState={errorMessage ? 'invalid' : undefined}
@@ -419,7 +407,7 @@ function SingleSchemaField ({
 
   return (
     <TextField
-      label={labelWithProperty}
+      label={cleanLabel}
       isRequired={field.required}
       placeholder={field.placeholder || ''}
       value={value || ''}
@@ -455,7 +443,7 @@ export default function DynamicSchemaForm ({
   const [showOptional, setShowOptional] = useState(false);
 
   if (!schema) {
-    return <Text>Loading folder metadata schema...</Text>;
+    return <Text>Loading metadata form…</Text>;
   }
 
   const requiredFields = schema.requiredFields || [];
@@ -471,57 +459,43 @@ export default function DynamicSchemaForm ({
 
   return (
     <Flex direction="column" gap="size-200">
-      {/* Schema Provenance Banner */}
-      <View backgroundColor="gray-100" padding="size-150" borderRadius="regular">
+      {/* Schema Summary Header */}
+      <div className="gu-card-subtle">
         <Flex justifyContent="space-between" alignItems="center" wrap gap="size-100">
-          <Flex direction="column" gap="size-50">
-            <Text>
-              <b>Assigned Folder Schema:</b> <code>{schema.schemaName}</code>{' '}
-              {schema.sourcePath && (
-                <span style={{ opacity: 0.75, fontSize: '12px' }}>
-                  ({schema.sourcePath})
-                </span>
-              )}
+          <Flex alignItems="center" gap="size-100" wrap>
+            <Text UNSAFE_style={{ fontSize: '12.5px' }}>
+              Metadata Form: <b>{schema.schemaName}</b>
             </Text>
-            <Text UNSAFE_style={{ fontSize: '12px', opacity: 0.8 }}>
+            <span className="gu-badge-neutral">
               {schema.isInherited
-                ? `Inherited from ancestor folder ${schema.inheritedFrom}`
-                : `Assigned directly on ${schema.folderPath}`}
-              {' · '}
-              {requiredFields.length} required governance field{requiredFields.length === 1 ? '' : 's'}
-              {optionalFields.length > 0 ? `, ${optionalFields.length} optional` : ''}
-            </Text>
+                ? `Inherited from ${schema.inheritedFrom}`
+                : `Assigned to ${schema.folderPath}`}
+            </span>
           </Flex>
-          <span className={validation?.valid ? 'gu-badge-ok' : 'gu-badge-req'}>
+          <StatusLight variant={validation?.valid ? 'positive' : 'notice'}>
             {validation?.valid
-              ? '✓ All Required Metadata Complete'
-              : `${validation?.errors?.length || 0} Required Field(s) Remaining`}
-          </span>
+              ? 'All required fields complete'
+              : `${validation?.errors?.length || 0} required field${validation?.errors?.length === 1 ? '' : 's'} remaining`}
+          </StatusLight>
         </Flex>
-      </View>
+      </div>
 
-      {/* Required Fields Grouped by Schema Tab */}
+      {/* Required Fields Grouped by Schema Section */}
       {Object.entries(requiredByTab).map(([tabName, tabFields]) => (
-        <View
-          key={`req-${tabName}`}
-          borderWidth="thin"
-          borderColor="dark"
-          borderRadius="regular"
-          padding="size-200"
-        >
+        <div key={`req-${tabName}`} className="gu-card">
           <Flex direction="column" gap="size-150">
             <Flex justifyContent="space-between" alignItems="center">
               <Heading level={4} margin={0}>
-                {tabName} — Required Fields
+                {tabName}
               </Heading>
-              <span className="gu-badge-req">Mandatory</span>
+              <span className="gu-badge-req">Required</span>
             </Flex>
             <Divider size="S" />
             <div
               style={{
                 display: 'grid',
                 gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
-                gap: '14px'
+                gap: '16px'
               }}
             >
               {tabFields.map((field) => (
@@ -544,34 +518,36 @@ export default function DynamicSchemaForm ({
               ))}
             </div>
           </Flex>
-        </View>
+        </div>
       ))}
 
       {/* Optional Schema Fields Accordion */}
       {optionalFields.length > 0 && (
-        <View borderWidth="thin" borderColor="light" borderRadius="regular" padding="size-150">
+        <div className="gu-card-subtle">
           <Flex direction="column" gap="size-150">
             <Flex justifyContent="space-between" alignItems="center">
-              <Text>
-                <b>Additional Optional Fields from "{schema.schemaName}" Schema</b> ({optionalFields.length} fields)
+              <Text UNSAFE_style={{ fontWeight: 600, fontSize: '13px' }}>
+                Additional Metadata Fields ({optionalFields.length} optional)
               </Text>
-              <ActionButton onPress={() => setShowOptional(!showOptional)}>
-                {showOptional ? 'Hide Optional Fields ▲' : 'Show Optional Fields ▼'}
+              <ActionButton isQuiet onPress={() => setShowOptional(!showOptional)}>
+                {showOptional ? <ChevronUp size="S" /> : <ChevronDown size="S" />}
+                <Text>{showOptional ? 'Hide Optional' : 'Show Optional'}</Text>
               </ActionButton>
             </Flex>
 
             {showOptional &&
               Object.entries(optionalByTab).map(([tabName, tabFields]) => (
-                <View key={`opt-${tabName}`} backgroundColor="gray-75" padding="size-150" borderRadius="regular">
+                <div key={`opt-${tabName}`} className="gu-card">
                   <Flex direction="column" gap="size-125">
                     <Heading level={5} margin={0}>
-                      {tabName} (Optional)
+                      {tabName}
                     </Heading>
+                    <Divider size="S" />
                     <div
                       style={{
                         display: 'grid',
                         gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
-                        gap: '12px'
+                        gap: '14px'
                       }}
                     >
                       {tabFields.map((field) => (
@@ -594,10 +570,10 @@ export default function DynamicSchemaForm ({
                       ))}
                     </div>
                   </Flex>
-                </View>
+                </div>
               ))}
           </Flex>
-        </View>
+        </div>
       )}
     </Flex>
   );

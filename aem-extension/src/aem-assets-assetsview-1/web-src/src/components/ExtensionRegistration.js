@@ -80,7 +80,7 @@ function ExtensionRegistration () {
       }).toString();
 
       activeGuestConnection.host.modal.openDialog({
-        title: 'Guided Upload — Metadata, Rights & Naming Guardrails',
+        title: 'Add Assets',
         contentUrl: `/index.html?cb=${Date.now()}#modal-guided-upload?${qs}`,
         type: 'modal',
         size: 'L',

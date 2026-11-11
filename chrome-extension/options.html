@@ -2,55 +2,81 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>AEM Guided Upload Guardrail — Options</title>
+  <title>AEM Guided Upload — Options</title>
   <style>
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-family: adobe-clean, "Source Sans Pro", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       margin: 0;
       padding: 18px 20px;
       min-width: 320px;
-      color: #222;
-      background: #fafafa;
+      color: #1d1d1d;
+      background: #f8f8f8;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
     }
     h2 {
-      margin: 0 0 6px;
-      font-size: 15px;
+      margin: 0;
+      font-size: 14px;
+      font-weight: 700;
     }
     p {
       margin: 0 0 14px;
       font-size: 12px;
-      color: #666;
-      line-height: 1.4;
+      color: #505050;
+      line-height: 1.45;
+    }
+    .card {
+      background: #ffffff;
+      border: 1px solid #e1e1e1;
+      border-radius: 6px;
+      padding: 12px 14px;
     }
     label {
       display: flex;
       align-items: center;
       gap: 10px;
-      font-size: 13px;
+      font-size: 12.5px;
       margin-bottom: 10px;
       cursor: pointer;
     }
+    label:last-child {
+      margin-bottom: 0;
+    }
+    input[type="checkbox"] {
+      accent-color: #0265dc;
+      width: 15px;
+      height: 15px;
+    }
     .status {
       font-size: 11.5px;
-      color: #0f7d55;
+      color: #007a4d;
+      font-weight: 600;
       margin-top: 8px;
       min-height: 16px;
     }
   </style>
 </head>
 <body>
-  <h2>🛡️ AEM Guided Upload Guardrail</h2>
-  <p>Intercepts raw drag-and-drop uploads on the AEM Assets View grid and routes dropped files/folders into the Guided Upload modal.</p>
+  <div class="header">
+    <h2>AEM Assets View — Upload Guardrail</h2>
+  </div>
+  <p>Routes drag-and-drop uploads on the AEM Assets View browse grid through the Add Assets metadata and naming workflow.</p>
 
-  <label>
-    <input type="checkbox" id="enabled" checked>
-    <span>Intercept ungoverned drag-and-drop on Assets View grid</span>
-  </label>
+  <div class="card">
+    <label>
+      <input type="checkbox" id="enabled" checked>
+      <span>Intercept drag-and-drop on Assets View grid</span>
+    </label>
 
-  <label>
-    <input type="checkbox" id="handoffOnDrop" checked>
-    <span>Auto-open Guided Upload &amp; hand off dropped files/folders</span>
-  </label>
+    <label>
+      <input type="checkbox" id="handoffOnDrop" checked>
+      <span>Automatically open Add Assets with dropped files</span>
+    </label>
+  </div>
 
   <div class="status" id="status"></div>
   <script src="options.js"></script>

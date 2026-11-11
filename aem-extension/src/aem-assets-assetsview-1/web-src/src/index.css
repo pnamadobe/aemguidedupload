@@ -3,80 +3,255 @@ body {
   margin: 0;
   padding: 0;
   font-family: adobe-clean, "Source Sans Pro", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 * {
   box-sizing: border-box;
 }
 
+/* AEM Assets View / Spectrum Context Header */
+.gu-context-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  background-color: var(--spectrum-global-color-gray-100, #f5f5f5);
+  border: 1px solid var(--spectrum-global-color-gray-200, #e6e6e6);
+}
+
+.gu-folder-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--spectrum-global-color-gray-900, #1d1d1d);
+}
+
+.gu-folder-path {
+  font-family: adobe-clean, "Source Sans Pro", -apple-system, sans-serif;
+  font-weight: 500;
+  color: var(--spectrum-global-color-gray-800, #2c2c2c);
+  background: var(--spectrum-global-color-gray-50, #ffffff);
+  border: 1px solid var(--spectrum-global-color-gray-300, #d5d5d5);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 12.5px;
+}
+
+/* Native Spectrum Horizontal Wizard Stepper */
+.gu-stepper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 2px;
+}
+
+.gu-step-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+  color: var(--spectrum-global-color-gray-700, #505050);
+}
+
+.gu-step-btn:hover:not(:disabled) {
+  background-color: var(--spectrum-global-color-gray-100, #f5f5f5);
+}
+
+.gu-step-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.gu-step-btn.is-active {
+  background-color: rgba(2, 101, 220, 0.08);
+  border-color: rgba(2, 101, 220, 0.28);
+  color: var(--spectrum-global-color-gray-900, #1d1d1d);
+}
+
+.gu-step-circle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 700;
+  background-color: var(--spectrum-global-color-gray-300, #d5d5d5);
+  color: var(--spectrum-global-color-gray-800, #2c2c2c);
+  flex-shrink: 0;
+}
+
+.gu-step-btn.is-active .gu-step-circle {
+  background-color: #0265dc;
+  color: #ffffff;
+}
+
+.gu-step-btn.is-complete .gu-step-circle {
+  background-color: #007a4d;
+  color: #ffffff;
+}
+
+.gu-step-label {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.gu-step-sub {
+  font-size: 11px;
+  color: var(--spectrum-global-color-gray-600, #6e6e6e);
+  line-height: 1.2;
+}
+
+.gu-step-connector {
+  flex: 1;
+  max-width: 36px;
+  height: 1px;
+  background-color: var(--spectrum-global-color-gray-300, #d5d5d5);
+}
+
+/* AEM Assets View Dropzone */
 .gu-dropzone {
-  border: 2px dashed #8e8e8e;
-  border-radius: 10px;
-  padding: 28px 20px;
+  border: 1.5px dashed var(--spectrum-global-color-gray-400, #b1b1b1);
+  border-radius: 8px;
+  padding: 36px 24px;
   text-align: center;
-  transition: border-color 0.15s ease, background-color 0.15s ease;
+  background-color: var(--spectrum-global-color-gray-75, #fafafa);
+  transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
   cursor: pointer;
 }
 
-.gu-dropzone.gu-dragover {
-  border-color: #1473e6;
-  background-color: rgba(20, 115, 230, 0.08);
+.gu-dropzone:hover {
+  border-color: var(--spectrum-global-color-gray-600, #6e6e6e);
+  background-color: var(--spectrum-global-color-gray-100, #f5f5f5);
 }
 
+.gu-dropzone.gu-dragover {
+  border-color: #0265dc;
+  background-color: rgba(2, 101, 220, 0.06);
+  box-shadow: 0 0 0 3px rgba(2, 101, 220, 0.12);
+}
+
+/* Spectrum Section Cards */
+.gu-card {
+  border: 1px solid var(--spectrum-global-color-gray-200, #e1e1e1);
+  border-radius: 6px;
+  background-color: var(--spectrum-global-color-gray-50, #ffffff);
+  padding: 16px;
+}
+
+.gu-card-subtle {
+  border: 1px solid var(--spectrum-global-color-gray-200, #e1e1e1);
+  border-radius: 6px;
+  background-color: var(--spectrum-global-color-gray-75, #fafafa);
+  padding: 12px 16px;
+}
+
+/* Spectrum Tag Chips & Naming Token Pills */
 .gu-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 3px 10px;
-  border-radius: 999px;
+  border-radius: 4px;
   font-size: 12px;
-  font-weight: 600;
-  background: rgba(20, 115, 230, 0.12);
-  color: #0d66d0;
-  border: 1px solid rgba(20, 115, 230, 0.3);
+  font-weight: 500;
+  background: var(--spectrum-global-color-gray-200, #e6e6e6);
+  color: var(--spectrum-global-color-gray-900, #1d1d1d);
+  border: 1px solid var(--spectrum-global-color-gray-300, #d5d5d5);
+}
+
+.gu-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  color: var(--spectrum-global-color-gray-700, #505050);
+  padding: 0 0 0 2px;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.gu-chip-remove:hover {
+  color: var(--spectrum-global-color-gray-900, #1d1d1d);
 }
 
 .gu-token-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   padding: 4px 10px;
-  border-radius: 6px;
+  border-radius: 4px;
   font-size: 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   cursor: pointer;
-  border: 1px solid #d0d0d0;
-  background: #ffffff;
-  color: #222222;
-  transition: all 0.12s ease;
+  border: 1px solid var(--spectrum-global-color-gray-300, #d5d5d5);
+  background: var(--spectrum-global-color-gray-50, #ffffff);
+  color: var(--spectrum-global-color-gray-900, #222222);
+  transition: border-color 0.12s ease, background-color 0.12s ease, color 0.12s ease;
 }
 
 .gu-token-btn:hover {
-  border-color: #1473e6;
-  background: rgba(20, 115, 230, 0.08);
-  color: #0d66d0;
+  border-color: #0265dc;
+  background: rgba(2, 101, 220, 0.08);
+  color: #0265dc;
 }
 
+/* Spectrum Status Badges */
 .gu-badge-req {
-  display: inline-block;
-  padding: 2px 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
   border-radius: 4px;
   font-size: 11px;
-  font-weight: 700;
-  background: rgba(201, 37, 45, 0.12);
+  font-weight: 600;
+  background: rgba(215, 55, 63, 0.12);
   color: #c9252d;
 }
 
 .gu-badge-ok {
-  display: inline-block;
-  padding: 2px 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
   border-radius: 4px;
   font-size: 11px;
-  font-weight: 700;
-  background: rgba(15, 125, 85, 0.14);
-  color: #0f7d55;
+  font-weight: 600;
+  background: rgba(0, 122, 77, 0.12);
+  color: #007a4d;
 }
 
+.gu-badge-neutral {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--spectrum-global-color-gray-200, #e6e6e6);
+  color: var(--spectrum-global-color-gray-800, #2c2c2c);
+}
+
+/* Spectrum Table & Inline Inputs */
 .gu-table {
   width: 100%;
   border-collapse: collapse;
@@ -87,13 +262,55 @@ body {
 .gu-table td {
   padding: 8px 10px;
   text-align: left;
-  border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+  border-bottom: 1px solid var(--spectrum-global-color-gray-200, #e6e6e6);
+  color: var(--spectrum-global-color-gray-900, #1d1d1d);
 }
 
 .gu-table th {
-  font-weight: 700;
-  font-size: 11.5px;
+  font-weight: 600;
+  font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
-  opacity: 0.75;
+  letter-spacing: 0.04em;
+  color: var(--spectrum-global-color-gray-600, #6e6e6e);
+  background: var(--spectrum-global-color-gray-75, #fafafa);
+}
+
+.gu-inline-input {
+  width: 100%;
+  height: 30px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--spectrum-global-color-gray-400, #b1b1b1);
+  background: var(--spectrum-global-color-gray-50, #ffffff);
+  color: var(--spectrum-global-color-gray-900, #1d1d1d);
+  font-family: inherit;
+  font-size: 12.5px;
+  outline: none;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.gu-inline-input:focus {
+  border-color: #0265dc;
+  box-shadow: 0 0 0 1px #0265dc;
+}
+
+.gu-inline-input.is-invalid {
+  border-color: #d7373f;
+}
+
+.gu-inline-input.is-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+}
+
+.gu-file-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 8px;
+  border-radius: 4px;
+}
+
+.gu-file-row:hover {
+  background-color: var(--spectrum-global-color-gray-100, #f5f5f5);
 }

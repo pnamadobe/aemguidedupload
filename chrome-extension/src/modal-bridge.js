@@ -360,7 +360,7 @@
       refreshToastHost = null;
     }
 
-    const bg = variant === 'positive' ? '#12805c' : '#0d66d0';
+    const bg = variant === 'positive' ? '#007a4d' : '#292929';
     refreshToastHost = document.createElement('div');
     const shadow = refreshToastHost.attachShadow({ mode: 'open' });
     shadow.innerHTML = `
@@ -376,14 +376,14 @@
         .toast {
           background: ${bg};
           color: #ffffff;
-          padding: 12px 18px;
-          border-radius: 8px;
+          padding: 10px 16px;
+          border-radius: 6px;
           font-size: 13px;
-          font-weight: 600;
-          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+          font-weight: 500;
+          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.24);
           display: flex;
           align-items: center;
-          gap: 10px;
+          gap: 8px;
         }
       </style>
       <div class="toast"></div>
@@ -506,9 +506,9 @@
         } catch (e) { /* ignore */ }
         const firstLabel = expectedNames[0] ? `"${expectedNames[0]}"` : `${count} asset(s)`;
         showRefreshToast(
-          `✓ Uploaded ${firstLabel}${count > 1 ? ` (+${count - 1} more)` : ''} to ${targetFolder}`,
+          `Uploaded ${firstLabel}${count > 1 ? ` (+${count - 1} more)` : ''} to ${targetFolder}`,
           'positive',
-          5000
+          4500
         );
       }, 200);
     }, 550);

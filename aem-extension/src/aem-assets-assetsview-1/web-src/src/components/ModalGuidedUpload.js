@@ -10,12 +10,17 @@ import {
   Button,
   View,
   ProgressCircle,
+  ProgressBar,
+  StatusLight,
   TextField,
   Picker,
   Item,
   ActionButton,
   Divider
 } from '@adobe/react-spectrum';
+import Folder from '@spectrum-icons/workflow/Folder';
+import Edit from '@spectrum-icons/workflow/Edit';
+import Alert from '@spectrum-icons/workflow/Alert';
 
 import { extensionId, HANDOFF_MESSAGE_NS, STORAGE_KEY_CTX, isTrustedMessageOrigin } from './Constants';
 import FolderDropzone, { shouldIgnoreFile } from './FolderDropzone';
@@ -265,6 +270,7 @@ export default function ModalGuidedUpload () {
 
   const [folderPath, setFolderPath] = useState(initialCtx.folderPath || '/content/dam');
   const [folderInput, setFolderInput] = useState(initialCtx.folderPath || '/content/dam');
+  const [editingFolder, setEditingFolder] = useState(false);
   const [aemAuthorUrl, setAemAuthorUrl] = useState('');
 
   // Wizard step: 1 = Files & Folder Tree, 2 = Folder Metadata & Rights, 3 = Naming & Commit
@@ -810,433 +816,407 @@ export default function ModalGuidedUpload () {
     }
   };
 
+  const overallUploadPercent = uploadProgress.totalFiles > 0
+    ? Math.min(
+      100,
+      Math.round(
+        ((uploadProgress.completedFiles + (uploadProgress.currentFilePercent || 0) / 100) /
+          uploadProgress.totalFiles) *
+          100
+      )
+    )
+    : 0;
+
   return (
     <Provider theme={defaultTheme} colorScheme={colorScheme}>
       <View padding="size-250">
         <Flex direction="column" gap="size-200">
-          {/* Top Context & Folder Bar */}
-          <View backgroundColor="gray-75" padding="size-150" borderRadius="regular">
-            <Flex justifyContent="space-between" alignItems="end" wrap gap="size-150">
+          {/* AEM Assets View Folder & Metadata Form Context Bar */}
+          <div className="gu-context-bar">
+            {!editingFolder ? (
+              <div className="gu-folder-crumb">
+                <Folder size="S" />
+                <span className="gu-folder-path">{folderPath}</span>
+                <ActionButton
+                  isQuiet
+                  aria-label="Change destination folder"
+                  onPress={() => {
+                    setFolderInput(folderPath);
+                    setEditingFolder(true);
+                  }}
+                >
+                  <Edit size="XS" />
+                </ActionButton>
+              </div>
+            ) : (
               <Flex gap="size-100" alignItems="end" wrap flex="1">
                 <TextField
-                  label="Target AEM DAM Folder"
+                  aria-label="Destination folder path"
                   value={folderInput}
                   onChange={setFolderInput}
                   width="size-4600"
                 />
-                {folderInput.trim() !== folderPath && (
-                  <ActionButton
-                    onPress={() => {
-                      const cleaned = folderInput.trim().replace(/\/+$/, '') || '/content/dam';
-                      setFolderPath(cleaned);
-                    }}
-                  >
-                    Switch Folder & Reload Schema
-                  </ActionButton>
-                )}
+                <ActionButton
+                  onPress={() => {
+                    const cleaned = folderInput.trim().replace(/\/+$/, '') || '/content/dam';
+                    setFolderPath(cleaned);
+                    setEditingFolder(false);
+                  }}
+                >
+                  Apply
+                </ActionButton>
+                <ActionButton
+                  isQuiet
+                  onPress={() => {
+                    setFolderInput(folderPath);
+                    setEditingFolder(false);
+                  }}
+                >
+                  Cancel
+                </ActionButton>
               </Flex>
-              <Flex alignItems="center" gap="size-100">
-                {schemaLoading && <ProgressCircle size="S" isIndeterminate aria-label="Loading schema" />}
-                <Text UNSAFE_style={{ fontSize: '12px' }}>
-                  Schema: <b>{schema ? schema.schemaName : 'loading…'}</b>
-                </Text>
-              </Flex>
-            </Flex>
-            {schemaError && (
-              <Text UNSAFE_style={{ color: '#b35c00', fontSize: '12px', marginTop: '6px', display: 'block' }}>
-                ⚠ {schemaError}
-              </Text>
             )}
-          </View>
 
-          {/* Step Navigation Bar */}
-          {!completedResult && (
-            <Flex gap="size-100" wrap>
-              <Button
-                variant={step === 1 ? 'cta' : 'secondary'}
-                onPress={() => setStep(1)}
-              >
-                1. Files & Folder Structure ({queuedFiles.length})
-              </Button>
-              <Button
-                variant={step === 2 ? 'cta' : 'secondary'}
-                isDisabled={queuedFiles.length === 0}
-                onPress={() => setStep(2)}
-              >
-                2. Required Metadata & Rights {validation.valid ? '✓' : `(${validation.errors.length} req)`}
-              </Button>
-              <Button
-                variant={step === 3 ? 'cta' : 'secondary'}
-                isDisabled={queuedFiles.length === 0 || !validation.valid}
-                onPress={() => setStep(3)}
-              >
-                3. Naming & Upload
-              </Button>
+            <Flex alignItems="center" gap="size-100">
+              {schemaLoading && <ProgressCircle size="S" isIndeterminate aria-label="Loading schema" />}
+              <span className="gu-badge-neutral">
+                Form: {schema ? schema.schemaName : 'loading…'}
+              </span>
             </Flex>
+          </div>
+
+          {schemaError && (
+            <StatusLight variant="notice">
+              {schemaError}
+            </StatusLight>
           )}
+
+          {/* Native Spectrum Horizontal Wizard Stepper */}
+          <div className="gu-stepper" role="navigation" aria-label="Upload steps">
+            <button
+              type="button"
+              className={`gu-step-btn ${step === 1 ? 'is-active' : (queuedFiles.length > 0 ? 'is-complete' : '')}`}
+              onClick={() => setStep(1)}
+            >
+              <span className="gu-step-circle">
+                {step > 1 && queuedFiles.length > 0 ? '✓' : '1'}
+              </span>
+              <span>
+                <div className="gu-step-label">Select Assets</div>
+                <div className="gu-step-sub">
+                  {queuedFiles.length > 0 ? `${queuedFiles.length} selected` : 'Files or folders'}
+                </div>
+              </span>
+            </button>
+
+            <div className="gu-step-connector" />
+
+            <button
+              type="button"
+              className={`gu-step-btn ${step === 2 ? 'is-active' : (queuedFiles.length > 0 && validation.valid && step > 2 ? 'is-complete' : '')}`}
+              disabled={queuedFiles.length === 0}
+              onClick={() => setStep(2)}
+            >
+              <span className="gu-step-circle">
+                {queuedFiles.length > 0 && validation.valid && step > 2 ? '✓' : '2'}
+              </span>
+              <span>
+                <div className="gu-step-label">Metadata & Rights</div>
+                <div className="gu-step-sub">
+                  {validation.valid ? 'Complete' : `${validation.errors.length} required`}
+                </div>
+              </span>
+            </button>
+
+            <div className="gu-step-connector" />
+
+            <button
+              type="button"
+              className={`gu-step-btn ${step === 3 ? 'is-active' : ''}`}
+              disabled={queuedFiles.length === 0 || !validation.valid}
+              onClick={() => setStep(3)}
+            >
+              <span className="gu-step-circle">3</span>
+              <span>
+                <div className="gu-step-label">File Naming & Upload</div>
+                <div className="gu-step-sub">
+                  {namingPlan.allValid ? 'Ready' : 'Review names'}
+                </div>
+              </span>
+            </button>
+          </div>
 
           <Divider size="S" />
 
-          {/* Completion Screen */}
-          {completedResult ? (
-            <View backgroundColor="gray-100" padding="size-250" borderRadius="regular">
-              <Flex direction="column" gap="size-150">
-                <Heading level={3} margin={0}>
-                  ✓ Guided Upload Complete ({completedResult.completedCount} asset{completedResult.completedCount === 1 ? '' : 's'} committed)
-                </Heading>
-                <Text>
-                  All files were renamed according to your naming rules, placed into their target DAM folder hierarchy, and tagged with the required <b>{schema.schemaName}</b> metadata.
-                </Text>
-                <View maxHeight="size-3000" overflow="auto" backgroundColor="gray-50" padding="size-150" borderRadius="regular">
-                  <table className="gu-table">
-                    <thead>
-                      <tr>
-                        <th>Governed Filename</th>
-                        <th>DAM Destination Path</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(completedResult.assets || []).map((asset) => (
-                        <tr key={asset.damPath}>
-                          <td><b>{asset.fileName}</b></td>
-                          <td><code>{asset.damPath}</code></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </View>
-                <Flex justifyContent="end" gap="size-125" wrap marginTop="size-100">
-                  <Button
-                    variant="secondary"
-                    onPress={() => {
-                      setCompletedResult(null);
-                      handleClearFiles();
-                      setStep(1);
-                    }}
-                  >
-                    Upload More Assets
-                  </Button>
-                  {(() => {
-                    const subfolders = [...new Set(
-                      (completedResult.assets || [])
-                        .map((a) => a.targetFolder)
-                        .filter((tf) => tf && tf !== folderPath)
-                    )];
-                    if (subfolders.length === 1) {
-                      const leaf = subfolders[0].split('/').pop();
-                      return (
-                        <Button
-                          variant="primary"
-                          onPress={() => triggerFolderRefreshAndClose(subfolders[0])}
-                        >
-                          {`Open Subfolder (${leaf})`}
-                        </Button>
-                      );
-                    }
-                    return null;
-                  })()}
-                  <Button variant="cta" onPress={() => triggerFolderRefreshAndClose(folderPath)}>
-                    Done
-                  </Button>
-                </Flex>
-              </Flex>
-            </View>
-          ) : (
-            <React.Fragment>
-              {/* STEP 1: Dropzone & Folder Hierarchy */}
-              {step === 1 && (
-                <FolderDropzone
-                  baseFolder={folderPath}
-                  files={queuedFiles}
-                  onAddFiles={handleAddFiles}
-                  onRemoveFile={handleRemoveFile}
-                  onClearFiles={handleClearFiles}
-                  normalizeSubfolders={normalizeSubfolders}
-                  onToggleNormalizeSubfolders={setNormalizeSubfolders}
-                  handoffSource={handoffSource}
-                />
-              )}
-
-              {/* STEP 2: Dynamic Folder Metadata Schema Form */}
-              {step === 2 && (
-                <DynamicSchemaForm
-                  schema={schema}
-                  values={metadataValues}
-                  onChangeValue={handleChangeMetadata}
-                  availableTags={availableTags}
-                  queuedFiles={queuedFiles}
-                  perAssetTitles={perAssetTitles}
-                  onChangePerAssetTitle={handleChangePerAssetTitle}
-                  onBatchSetPerAssetTitles={setPerAssetTitles}
-                  validation={validation}
-                />
-              )}
-
-              {/* STEP 3: Auto-Naming Engine & Commit */}
-              {step === 3 && (
-                <Flex direction="column" gap="size-200">
-                  <View borderWidth="thin" borderColor="dark" borderRadius="regular" padding="size-200">
-                    <Flex direction="column" gap="size-150">
-                      <Heading level={4} margin={0}>
-                        Auto-Naming Convention Builder
-                      </Heading>
-                      <Text UNSAFE_style={{ fontSize: '12.5px', opacity: 0.85 }}>
-                        Click any token below to insert it into the naming pattern. Tokens pull live values from the <b>{schema.schemaName}</b> metadata entered in Step 2.
-                      </Text>
-
-                      <Flex gap="size-150" wrap alignItems="end">
-                        <TextField
-                          label="Filename Pattern (extension added automatically)"
-                          value={namingPattern}
-                          onChange={setNamingPattern}
-                          width="size-4600"
-                        />
-                        <Picker
-                          label="Token Case Style"
-                          selectedKey={caseStyle}
-                          onSelectionChange={(k) => k && setCaseStyle(String(k))}
-                          width="size-2400"
-                        >
-                          <Item key="kebab">kebab-case (recommended)</Item>
-                          <Item key="snake">snake_case</Item>
-                          <Item key="camel">camelCase</Item>
-                          <Item key="preserve">Preserve Case</Item>
-                        </Picker>
-                        {Object.keys(manualNameOverrides).length > 0 && (
-                          <ActionButton onPress={() => setManualNameOverrides({})}>
-                            Reset Manual Edits
-                          </ActionButton>
-                        )}
-                      </Flex>
-
-                      {/* Clickable Schema & Built-in Token Pills */}
-                      <Flex wrap gap="size-75" alignItems="center">
-                        <Text UNSAFE_style={{ fontSize: '12px', fontWeight: 700 }}>
-                          Insert Token:
-                        </Text>
-                        {((schema && schema.naming && schema.naming.tokens) || []).map((tok) => (
-                          <button
-                            key={tok.key}
-                            type="button"
-                            className="gu-token-btn"
-                            title={`${tok.label} (${tok.property})`}
-                            onClick={() => insertTokenIntoPattern(tok.key)}
-                          >
-                            {`{${tok.key}}`}
-                            <span style={{ opacity: 0.65, fontSize: '10.5px' }}>
-                              {tok.label}
-                            </span>
-                          </button>
-                        ))}
-                      </Flex>
-                    </Flex>
-                  </View>
-
-                  {/* Before -> After Filename & Folder Preview Table */}
-                  <View borderWidth="thin" borderColor="dark" borderRadius="regular" padding="size-200">
-                    <Flex direction="column" gap="size-125">
-                      <Flex justifyContent="space-between" alignItems="center">
-                        <Heading level={4} margin={0}>
-                          Governed Filename & Folder Placement Preview ({namingPlan.validCount}/{namingPlan.totalCount} compliant)
-                        </Heading>
-                        <span className={namingPlan.allValid ? 'gu-badge-ok' : 'gu-badge-req'}>
-                          {namingPlan.allValid ? '✓ All Filenames Valid' : '⚠ Resolve Naming Issues'}
-                        </span>
-                      </Flex>
-
-                      <View maxHeight="size-3000" overflow="auto">
-                        <table className="gu-table">
-                          <thead>
-                            <tr>
-                              <th>Original File</th>
-                              <th>Target DAM Folder</th>
-                              <th>Governed Filename (Editable)</th>
-                              <th>Status</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {namingPlan.items.map((item) => (
-                              <tr key={item.id}>
-                                <td>
-                                  <code>{item.relativePath}</code>
-                                </td>
-                                <td>
-                                  <code>{item.targetFolder}</code>
-                                </td>
-                                <td>
-                                  <input
-                                    type="text"
-                                    value={
-                                      manualNameOverrides[item.id] !== undefined
-                                        ? manualNameOverrides[item.id]
-                                        : item.governedName
-                                    }
-                                    onChange={(e) => {
-                                      const val = e.target.value;
-                                      setManualNameOverrides((prev) => ({
-                                        ...prev,
-                                        [item.id]: val
-                                      }));
-                                    }}
-                                    style={{
-                                      width: '100%',
-                                      padding: '5px 8px',
-                                      borderRadius: '4px',
-                                      border: item.valid ? '1px solid #8e8e8e' : '1px solid #c9252d',
-                                      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                                      fontSize: '12px'
-                                    }}
-                                  />
-                                </td>
-                                <td>
-                                  {item.valid ? (
-                                    <span className="gu-badge-ok">Valid</span>
-                                  ) : (
-                                    <span className="gu-badge-req" title={item.issues.join('; ')}>
-                                      {item.issues[0]}
-                                    </span>
-                                  )}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </View>
-                    </Flex>
-                  </View>
-                </Flex>
-              )}
-
-              {/* Duplicate Asset Conflict Resolution Prompt */}
-              {duplicateConflicts.length > 0 && !uploading && (
-                <View borderWidth="thick" borderColor="notice" backgroundColor="gray-75" padding="size-200" borderRadius="regular">
-                  <Flex direction="column" gap="size-125">
-                    <Heading level={4} margin={0}>
-                      ⚠ Duplicate Asset{duplicateConflicts.length === 1 ? '' : 's'} Detected in AEM ({duplicateConflicts.length})
-                    </Heading>
-                    <Text UNSAFE_style={{ fontSize: '12.5px' }}>
-                      The following governed filename{duplicateConflicts.length === 1 ? ' already exists' : 's already exist'} in the target DAM folder:{' '}
-                      <b>{duplicateConflicts.map((d) => d.fileName).join(', ')}</b>. Choose how to handle duplicates:
-                    </Text>
-                    <Flex gap="size-100" wrap marginTop="size-50">
-                      <Button variant="cta" onPress={() => handleCommitUpload('keep-both')}>
-                        Keep Both (Auto-Rename -1)
-                      </Button>
-                      <Button variant="primary" onPress={() => handleCommitUpload('replace')}>
-                        Replace Existing
-                      </Button>
-                      <Button variant="secondary" onPress={() => handleCommitUpload('version')}>
-                        Create New Version
-                      </Button>
-                      <Button variant="secondary" onPress={() => handleCommitUpload('skip')}>
-                        Skip Duplicates
-                      </Button>
-                      <ActionButton isQuiet onPress={() => setDuplicateConflicts([])}>
-                        Cancel
-                      </ActionButton>
-                    </Flex>
-                  </Flex>
-                </View>
-              )}
-
-              {/* Upload Manager Progress Panel */}
-              {uploading && (
-                <View borderWidth="thin" borderColor="dark" backgroundColor="gray-100" padding="size-200" borderRadius="regular">
-                  <Flex direction="column" gap="size-125">
-                    <Flex alignItems="center" justifyContent="space-between">
-                      <Flex alignItems="center" gap="size-125">
-                        <ProgressCircle size="S" isIndeterminate aria-label="Uploading" />
-                        <Text><b>Upload Manager — {uploadPhase}</b></Text>
-                      </Flex>
-                      {uploadProgress.totalFiles > 0 && (
-                        <Text UNSAFE_style={{ fontSize: '12px', fontWeight: 700 }}>
-                          File {Math.min(uploadProgress.completedFiles + 1, uploadProgress.totalFiles)} of {uploadProgress.totalFiles}
-                          {uploadProgress.currentFile ? ` • ${uploadProgress.currentFilePercent}%` : ''}
-                        </Text>
-                      )}
-                    </Flex>
-                    {uploadProgress.totalFiles > 0 && (
-                      <div style={{ width: '100%', height: '8px', background: '#dcdcdc', borderRadius: '999px', overflow: 'hidden' }}>
-                        <div
-                          style={{
-                            width: `${Math.min(
-                              100,
-                              Math.round(
-                                ((uploadProgress.completedFiles + (uploadProgress.currentFilePercent || 0) / 100) /
-                                  uploadProgress.totalFiles) *
-                                  100
-                              )
-                            )}%`,
-                            height: '100%',
-                            background: '#1473e6',
-                            transition: 'width 0.2s ease'
-                          }}
-                        />
-                      </div>
-                    )}
-                    {uploadProgress.currentFile && (
-                      <Text UNSAFE_style={{ fontSize: '12px', opacity: 0.85 }}>
-                        Streaming binary: <code>{uploadProgress.currentFile}</code> ({uploadProgress.currentFilePercent}%)
-                      </Text>
-                    )}
-                  </Flex>
-                </View>
-              )}
-
-              {uploadError && (
-                <View backgroundColor="negative" padding="size-125" borderRadius="regular">
-                  <Text UNSAFE_style={{ color: '#fff' }}>
-                    <b>✖ {uploadError}</b>
-                  </Text>
-                </View>
-              )}
-
-              {/* Wizard Footer Actions */}
-              <Flex justifyContent="space-between" alignItems="center" marginTop="size-100">
-                <Button variant="secondary" onPress={closeDialog} isDisabled={uploading}>
-                  Cancel
-                </Button>
-                <ButtonGroup>
-                  {step > 1 && (
-                    <Button
-                      variant="secondary"
-                      onPress={() => setStep(step - 1)}
-                      isDisabled={uploading}
-                    >
-                      Back
-                    </Button>
-                  )}
-                  {step === 1 && (
-                    <Button
-                      variant="cta"
-                      isDisabled={queuedFiles.length === 0}
-                      onPress={() => setStep(2)}
-                    >
-                      Next: Required Metadata ({queuedFiles.length} file{queuedFiles.length === 1 ? '' : 's'})
-                    </Button>
-                  )}
-                  {step === 2 && (
-                    <Button
-                      variant="cta"
-                      isDisabled={!validation.valid}
-                      onPress={() => setStep(3)}
-                    >
-                      Next: Review Naming & Upload
-                    </Button>
-                  )}
-                  {step === 3 && (
-                    <Button
-                      variant="cta"
-                      isDisabled={uploading || !validation.valid || !namingPlan.allValid || queuedFiles.length === 0}
-                      onPress={() => handleCommitUpload('ask')}
-                    >
-                      {uploading ? 'Uploading…' : 'Upload'}
-                    </Button>
-                  )}
-                </ButtonGroup>
-              </Flex>
-            </React.Fragment>
+          {/* STEP 1: Dropzone & Folder Hierarchy */}
+          {step === 1 && (
+            <FolderDropzone
+              baseFolder={folderPath}
+              files={queuedFiles}
+              onAddFiles={handleAddFiles}
+              onRemoveFile={handleRemoveFile}
+              onClearFiles={handleClearFiles}
+              normalizeSubfolders={normalizeSubfolders}
+              onToggleNormalizeSubfolders={setNormalizeSubfolders}
+              handoffSource={handoffSource}
+            />
           )}
+
+          {/* STEP 2: Dynamic Folder Metadata Schema Form */}
+          {step === 2 && (
+            <DynamicSchemaForm
+              schema={schema}
+              values={metadataValues}
+              onChangeValue={handleChangeMetadata}
+              availableTags={availableTags}
+              queuedFiles={queuedFiles}
+              perAssetTitles={perAssetTitles}
+              onChangePerAssetTitle={handleChangePerAssetTitle}
+              onBatchSetPerAssetTitles={setPerAssetTitles}
+              validation={validation}
+            />
+          )}
+
+          {/* STEP 3: Auto-Naming Engine & Upload */}
+          {step === 3 && (
+            <Flex direction="column" gap="size-200">
+              <div className="gu-card">
+                <Flex direction="column" gap="size-150">
+                  <Heading level={4} margin={0}>
+                    Naming Convention
+                  </Heading>
+                  <Text UNSAFE_style={{ fontSize: '12.5px', opacity: 0.8 }}>
+                    Select tokens below to build the filename pattern using the <b>{schema.schemaName}</b> metadata values.
+                  </Text>
+
+                  <Flex gap="size-150" wrap alignItems="end">
+                    <TextField
+                      label="Filename Pattern"
+                      value={namingPattern}
+                      onChange={setNamingPattern}
+                      width="size-4600"
+                    />
+                    <Picker
+                      label="Case Format"
+                      selectedKey={caseStyle}
+                      onSelectionChange={(k) => k && setCaseStyle(String(k))}
+                      width="size-2400"
+                    >
+                      <Item key="kebab">kebab-case</Item>
+                      <Item key="snake">snake_case</Item>
+                      <Item key="camel">camelCase</Item>
+                      <Item key="preserve">Preserve Case</Item>
+                    </Picker>
+                    {Object.keys(manualNameOverrides).length > 0 && (
+                      <ActionButton isQuiet onPress={() => setManualNameOverrides({})}>
+                        Reset Custom Names
+                      </ActionButton>
+                    )}
+                  </Flex>
+
+                  <Flex wrap gap="size-75" alignItems="center">
+                    <Text UNSAFE_style={{ fontSize: '12px', fontWeight: 600, opacity: 0.8 }}>
+                      Tokens:
+                    </Text>
+                    {((schema && schema.naming && schema.naming.tokens) || []).map((tok) => (
+                      <button
+                        key={tok.key}
+                        type="button"
+                        className="gu-token-btn"
+                        title={tok.label}
+                        onClick={() => insertTokenIntoPattern(tok.key)}
+                      >
+                        {`{${tok.key}}`}
+                        <span style={{ opacity: 0.65, fontSize: '11px', fontFamily: 'inherit' }}>
+                          {tok.label}
+                        </span>
+                      </button>
+                    ))}
+                  </Flex>
+                </Flex>
+              </div>
+
+              {/* Filename & Folder Placement Preview Table */}
+              <div className="gu-card">
+                <Flex direction="column" gap="size-125">
+                  <Flex justifyContent="space-between" alignItems="center">
+                    <Heading level={4} margin={0}>
+                      Asset Preview ({namingPlan.validCount}/{namingPlan.totalCount})
+                    </Heading>
+                    <StatusLight variant={namingPlan.allValid ? 'positive' : 'negative'}>
+                      {namingPlan.allValid ? 'All filenames valid' : 'Resolve naming issues'}
+                    </StatusLight>
+                  </Flex>
+
+                  <View maxHeight="size-3000" overflow="auto">
+                    <table className="gu-table">
+                      <thead>
+                        <tr>
+                          <th>Source File</th>
+                          <th>Destination Folder</th>
+                          <th>Target Filename</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {namingPlan.items.map((item) => (
+                          <tr key={item.id}>
+                            <td>{item.relativePath}</td>
+                            <td>
+                              <span style={{ fontSize: '12px', opacity: 0.85 }}>{item.targetFolder}</span>
+                            </td>
+                            <td>
+                              <input
+                                type="text"
+                                className={`gu-inline-input is-mono ${item.valid ? '' : 'is-invalid'}`}
+                                value={
+                                  manualNameOverrides[item.id] !== undefined
+                                    ? manualNameOverrides[item.id]
+                                    : item.governedName
+                                }
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setManualNameOverrides((prev) => ({
+                                    ...prev,
+                                    [item.id]: val
+                                  }));
+                                }}
+                              />
+                            </td>
+                            <td>
+                              {item.valid ? (
+                                <span className="gu-badge-ok">Ready</span>
+                              ) : (
+                                <span className="gu-badge-req" title={item.issues.join('; ')}>
+                                  {item.issues[0]}
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </View>
+                </Flex>
+              </div>
+            </Flex>
+          )}
+
+          {/* Duplicate Asset Conflict Resolution Prompt */}
+          {duplicateConflicts.length > 0 && !uploading && (
+            <div className="gu-card-subtle">
+              <Flex direction="column" gap="size-125">
+                <Flex alignItems="center" gap="size-100">
+                  <Alert size="S" />
+                  <Heading level={4} margin={0}>
+                    Duplicate Asset{duplicateConflicts.length === 1 ? '' : 's'} Found ({duplicateConflicts.length})
+                  </Heading>
+                </Flex>
+                <Text UNSAFE_style={{ fontSize: '12.5px' }}>
+                  {duplicateConflicts.length === 1 ? 'An asset named ' : 'Assets named '}
+                  <b>{duplicateConflicts.map((d) => d.fileName).join(', ')}</b> already exist in this folder.
+                </Text>
+                <Flex gap="size-100" wrap marginTop="size-50">
+                  <Button variant="cta" onPress={() => handleCommitUpload('keep-both')}>
+                    Keep Both
+                  </Button>
+                  <Button variant="primary" onPress={() => handleCommitUpload('replace')}>
+                    Replace
+                  </Button>
+                  <Button variant="secondary" onPress={() => handleCommitUpload('version')}>
+                    Create Version
+                  </Button>
+                  <Button variant="secondary" onPress={() => handleCommitUpload('skip')}>
+                    Skip
+                  </Button>
+                  <ActionButton isQuiet onPress={() => setDuplicateConflicts([])}>
+                    Cancel
+                  </ActionButton>
+                </Flex>
+              </Flex>
+            </div>
+          )}
+
+          {/* Upload Progress Panel */}
+          {uploading && (
+            <div className="gu-card-subtle">
+              <Flex direction="column" gap="size-125">
+                <ProgressBar
+                  label={uploadPhase || 'Uploading assets…'}
+                  value={overallUploadPercent}
+                  width="100%"
+                />
+                {uploadProgress.totalFiles > 0 && (
+                  <Flex justifyContent="space-between" alignItems="center">
+                    <Text UNSAFE_style={{ fontSize: '12px', opacity: 0.8 }}>
+                      {uploadProgress.currentFile
+                        ? `Uploading ${uploadProgress.currentFile}`
+                        : 'Preparing upload…'}
+                    </Text>
+                    <Text UNSAFE_style={{ fontSize: '12px', fontWeight: 600 }}>
+                      {Math.min(uploadProgress.completedFiles + 1, uploadProgress.totalFiles)} of {uploadProgress.totalFiles}
+                    </Text>
+                  </Flex>
+                )}
+              </Flex>
+            </div>
+          )}
+
+          {uploadError && (
+            <div className="gu-card-subtle" style={{ borderColor: '#d7373f' }}>
+              <Flex alignItems="center" gap="size-100">
+                <Alert size="S" UNSAFE_style={{ color: '#d7373f' }} />
+                <Text UNSAFE_style={{ color: '#d7373f', fontWeight: 600 }}>
+                  {uploadError}
+                </Text>
+              </Flex>
+            </div>
+          )}
+
+          {/* Wizard Footer Actions */}
+          <Flex justifyContent="space-between" alignItems="center" marginTop="size-100">
+            <Button variant="secondary" onPress={closeDialog} isDisabled={uploading}>
+              Cancel
+            </Button>
+            <ButtonGroup>
+              {step > 1 && (
+                <Button
+                  variant="secondary"
+                  onPress={() => setStep(step - 1)}
+                  isDisabled={uploading}
+                >
+                  Back
+                </Button>
+              )}
+              {step === 1 && (
+                <Button
+                  variant="cta"
+                  isDisabled={queuedFiles.length === 0}
+                  onPress={() => setStep(2)}
+                >
+                  Continue
+                </Button>
+              )}
+              {step === 2 && (
+                <Button
+                  variant="cta"
+                  isDisabled={!validation.valid}
+                  onPress={() => setStep(3)}
+                >
+                  Continue
+                </Button>
+              )}
+              {step === 3 && (
+                <Button
+                  variant="cta"
+                  isDisabled={uploading || !validation.valid || !namingPlan.allValid || queuedFiles.length === 0}
+                  onPress={() => handleCommitUpload('ask')}
+                >
+                  {uploading ? 'Uploading…' : 'Upload'}
+                </Button>
+              )}
+            </ButtonGroup>
+          </Flex>
         </Flex>
       </View>
     </Provider>

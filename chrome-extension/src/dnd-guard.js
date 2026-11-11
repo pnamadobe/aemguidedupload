@@ -86,50 +86,53 @@
           display: flex;
           align-items: center;
           justify-content: center;
-          background: rgba(13, 102, 208, 0.16);
-          backdrop-filter: blur(2px);
+          background: rgba(2, 101, 220, 0.08);
+          backdrop-filter: blur(1.5px);
           font-family: adobe-clean, "Source Sans Pro", -apple-system, BlinkMacSystemFont, sans-serif;
         }
         .card {
           background: #ffffff;
           color: #1d1d1d;
-          border: 2px dashed #1473e6;
-          border-radius: 14px;
+          border: 1.5px dashed #0265dc;
+          border-radius: 8px;
           padding: 28px 36px;
-          box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
+          box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
           text-align: center;
-          max-width: 520px;
+          max-width: 460px;
         }
-        .badge {
-          display: inline-block;
-          background: #1473e6;
-          color: #ffffff;
-          font-size: 11px;
-          font-weight: 700;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-          padding: 4px 10px;
+        .icon-wrap {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 44px;
+          height: 44px;
           border-radius: 999px;
-          margin-bottom: 10px;
+          background: rgba(2, 101, 220, 0.1);
+          color: #0265dc;
+          margin-bottom: 12px;
         }
         h3 {
-          margin: 0 0 8px;
-          font-size: 18px;
-          font-weight: 800;
+          margin: 0 0 6px;
+          font-size: 16px;
+          font-weight: 700;
+          color: #1d1d1d;
         }
         p {
           margin: 0;
-          font-size: 13.5px;
+          font-size: 13px;
           color: #505050;
           line-height: 1.45;
         }
       </style>
       <div class="card">
-        <div class="badge">🛡️ Upload Governance Active</div>
-        <h3>Drop to Open Guided Upload Wizard</h3>
+        <div class="icon-wrap">
+          <svg width="22" height="22" viewBox="0 0 18 18" fill="currentColor" aria-hidden="true">
+            <path d="M14.6,7.1C14.2,4.2,11.7,2,8.8,2C6.1,2,3.8,3.8,3.1,6.4C1.3,6.9,0,8.6,0,10.5C0,12.9,1.9,14.8,4.3,14.8H7v-4.3H5.1L9,6.2l3.9,4.3H11v4.3h3.2c2.1,0,3.8-1.7,3.8-3.8C18,9,16.5,7.3,14.6,7.1z"/>
+          </svg>
+        </div>
+        <h3>Drop to Add Assets</h3>
         <p>
-          Direct ungoverned upload is blocked. Dropping your files or folders here will open
-          <b>Guided Upload</b> with your folder hierarchy preserved and folder metadata schema enforced.
+          Files and folder hierarchies will open in the upload dialog with folder metadata and naming applied.
         </p>
       </div>
     `;
@@ -159,24 +162,29 @@
           font-family: adobe-clean, "Source Sans Pro", -apple-system, BlinkMacSystemFont, sans-serif;
         }
         .toast {
-          background: #0d66d0;
-          color: #fff;
-          padding: 12px 18px;
-          border-radius: 8px;
+          background: #292929;
+          color: #ffffff;
+          padding: 10px 16px;
+          border-radius: 6px;
           font-size: 13px;
-          font-weight: 600;
-          box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+          font-weight: 500;
+          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.24);
+          display: flex;
+          align-items: center;
+          gap: 8px;
         }
       </style>
-      <div class="toast">${message}</div>
+      <div class="toast"><span class="msg"></span></div>
     `;
+    const msgEl = shadow.querySelector('.msg');
+    if (msgEl) msgEl.textContent = message;
     (document.body || document.documentElement).appendChild(toastHost);
     setTimeout(() => {
       if (toastHost) {
         toastHost.remove();
         toastHost = null;
       }
-    }, 4500);
+    }, 4000);
   }
 
   function isBypassedEvent (e) {
@@ -231,7 +239,7 @@
     const bridge = globalThis.__guModalBridge;
 
     if (!settings.handoffOnDrop || !bridge || !reader) {
-      showStatusBanner('🛡️ Direct drop blocked — click "Add assets" to use Guided Upload.');
+      showStatusBanner('Click "Add assets" to upload files with folder metadata.');
       return;
     }
 
@@ -241,15 +249,15 @@
     try {
       const items = await reader.resolveSnapshotToItems(snapshot);
       if (items.length > 0) {
-        showStatusBanner(`🛡️ Handing off ${items.length} file(s) to Guided Upload Wizard…`);
+        showStatusBanner(`Loading ${items.length} asset${items.length === 1 ? '' : 's'} into Add Assets…`);
         bridge.stageDroppedFilesAndOpenModal(items);
       } else {
-        showStatusBanner('🛡️ Direct drop intercepted — opening Guided Upload Wizard…');
+        showStatusBanner('Opening Add Assets…');
         bridge.stageDroppedFilesAndOpenModal([]);
       }
     } catch (err) {
       console.error('[Guided Upload Guardrail] Error reading dropped items:', err);
-      showStatusBanner('🛡️ Direct drop intercepted — opening Guided Upload Wizard…');
+      showStatusBanner('Opening Add Assets…');
       bridge.stageDroppedFilesAndOpenModal([]);
     }
   }
