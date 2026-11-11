@@ -495,7 +495,7 @@
       ? `${prefix}${encodePath(parentFolder)}${querySuffix}`
       : `${prefix}${querySuffix}`;
 
-    // Single fast SPA route bounce so React Router re-fetches the target folder contents without a page reload
+    // Wait ~550ms after modal close so AEM's repository index settles, then perform a single SPA route refresh
     setTimeout(() => {
       try {
         location.hash = bounceHash;
@@ -510,17 +510,17 @@
           'positive',
           5000
         );
-      }, 140);
-    }, 80);
+      }, 200);
+    }, 550);
 
     // Optional non-intrusive card highlight once the refreshed grid renders
     let attempts = 0;
     const poll = setInterval(() => {
       attempts++;
-      if (highlightExpectedItemsInDom(expectedNames) || attempts >= 6) {
+      if (highlightExpectedItemsInDom(expectedNames) || attempts >= 8) {
         clearInterval(poll);
       }
-    }, 400);
+    }, 450);
   }
 
   function stageDroppedFilesAndOpenModal (items = []) {
