@@ -10,7 +10,7 @@
   };
 
   function pushSettings (settings) {
-    window.postMessage({ __GU_SETTINGS__: settings }, '*');
+    window.postMessage({ __GU_SETTINGS__: settings }, window.location.origin);
   }
 
   try {

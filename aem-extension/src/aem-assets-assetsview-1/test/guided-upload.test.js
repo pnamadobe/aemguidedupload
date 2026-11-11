@@ -20,6 +20,10 @@ const {
 } = require('../web-src/src/components/ValidationRules');
 
 const {
+  isTrustedMessageOrigin
+} = require('../web-src/src/components/Constants');
+
+const {
   generateGovernedFileName,
   computeBatchNamingPlan,
   sanitizeSubfolderPath
@@ -651,5 +655,18 @@ describe('5. Security Guardrails: Authentication & Server-Pinned AEM Author Allo
         { baseFolder: '/content/dam/26H2/vail' }
       )
     ).rejects.toMatchObject({ status: 400 });
+  });
+
+  test('H1 & H2: validates postMessage origins against Adobe allowlist and rejects untrusted origins', () => {
+    expect(isTrustedMessageOrigin('https://experience.adobe.com')).toBe(true);
+    expect(isTrustedMessageOrigin('https://experience-stage.adobe.com')).toBe(true);
+    expect(isTrustedMessageOrigin('https://author-p59602-e520244.adobeaemcloud.com')).toBe(true);
+    expect(isTrustedMessageOrigin('https://767251-437chartreusegazelle.adobeio-static.net')).toBe(true);
+    expect(isTrustedMessageOrigin('https://localhost:9080')).toBe(true);
+
+    expect(isTrustedMessageOrigin('https://evil.example.com')).toBe(false);
+    expect(isTrustedMessageOrigin('https://experience.adobe.com.evil.com')).toBe(false);
+    expect(isTrustedMessageOrigin('null')).toBe(false);
+    expect(isTrustedMessageOrigin('')).toBe(false);
   });
 });

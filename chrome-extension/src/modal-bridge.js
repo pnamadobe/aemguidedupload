@@ -9,6 +9,7 @@
 
   let pendingBatch = null;
   let pendingUploadRefresh = null;
+  let lastKnownModal = null;
   let lastRefreshTriggeredAt = 0;
   let noStoreUntil = 0;
   let refreshToastHost = null;
@@ -17,6 +18,32 @@
     aemAuthorUrl: '',
     folderPath: '/content/dam'
   };
+
+  const TRUSTED_HOST_ORIGINS = [
+    /^https:\/\/experience\.adobe\.com$/i,
+    /^https:\/\/experience-stage\.adobe\.com$/i,
+    /^https:\/\/[a-z0-9-]+\.adobeaemcloud\.com$/i
+  ];
+
+  const TRUSTED_EXTENSION_ORIGINS = [
+    /^https:\/\/[a-z0-9-]+\.adobeio-static\.net$/i,
+    /^https?:\/\/localhost(?::\d+)?$/i,
+    /^https?:\/\/127\.0\.0\.1(?::\d+)?$/i
+  ];
+
+  function isTrustedHostOrigin (origin = '') {
+    const s = String(origin || '').trim();
+    return Boolean(s) && TRUSTED_HOST_ORIGINS.some((re) => re.test(s));
+  }
+
+  function isTrustedExtensionOrigin (origin = '') {
+    const s = String(origin || '').trim();
+    return Boolean(s) && TRUSTED_EXTENSION_ORIGINS.some((re) => re.test(s));
+  }
+
+  function isTrustedOrigin (origin = '') {
+    return isTrustedHostOrigin(origin) || isTrustedExtensionOrigin(origin);
+  }
 
   // Bypass browser HTTP cache on repository/folder-listing fetches right after an upload completes
   try {
@@ -130,8 +157,8 @@
   }
 
   /**
-   * Broadcasts a postMessage to EVERY frame in the window hierarchy via `win.frames`
-   * (works even when `<iframe>` elements are encapsulated inside Shadow DOM!).
+   * Broadcasts a metadata-only control message across frames in the window hierarchy.
+   * NEVER use this function for messages containing `File` objects.
    */
   function broadcastToAllFrames (msg) {
     let rootWin = window;
@@ -156,8 +183,42 @@
     walkFrames(rootWin);
   }
 
-  function deliverPendingBatchToFrame (targetWindow) {
-    if (!pendingBatch || !targetWindow) return false;
+  /**
+   * Syncs `STAGE_BATCH` only to trusted Adobe host origins (never `'*'`).
+   */
+  function broadcastToTrustedHostFrames (msg) {
+    const allowedTargetOrigins = [...new Set([
+      location.origin,
+      'https://experience.adobe.com',
+      'https://experience-stage.adobe.com'
+    ])].filter((o) => isTrustedHostOrigin(o));
+
+    let rootWin = window;
+    try {
+      if (window.top) rootWin = window.top;
+    } catch (e) { /* ignore */ }
+
+    const visited = new Set();
+    function walkFrames (win) {
+      if (!win || visited.has(win)) return;
+      visited.add(win);
+      for (const targetOrigin of allowedTargetOrigins) {
+        try {
+          win.postMessage(msg, targetOrigin);
+        } catch (e) { /* ignore */ }
+      }
+      try {
+        for (let i = 0; i < win.frames.length; i++) {
+          walkFrames(win.frames[i]);
+        }
+      } catch (e) { /* ignore */ }
+    }
+
+    walkFrames(rootWin);
+  }
+
+  function deliverPendingBatchToFrame (targetWindow, targetOrigin) {
+    if (!pendingBatch || !targetWindow || !isTrustedExtensionOrigin(targetOrigin)) return false;
     if (Date.now() - pendingBatch.createdAt > PENDING_TTL_MS) {
       pendingBatch = null;
       return false;
@@ -167,10 +228,9 @@
         {
           [HANDOFF_NS]: 'DROPPED_FILES',
           folderPath: pendingBatch.folderPath,
-          aemAuthorUrl: pendingBatch.aemAuthorUrl,
           items: pendingBatch.items
         },
-        '*'
+        targetOrigin
       );
       return true;
     } catch (e) {
@@ -180,10 +240,12 @@
   }
 
   window.addEventListener('message', (event) => {
-    const data = event && event.data;
+    if (!event || !isTrustedOrigin(event.origin)) return;
+    const data = event.data;
     if (!data || typeof data !== 'object') return;
 
     if (data[HANDOFF_NS] === 'STAGE_BATCH' && Array.isArray(data.items)) {
+      if (!isTrustedHostOrigin(event.origin)) return;
       pendingBatch = {
         createdAt: Date.now(),
         folderPath: data.folderPath || '/content/dam',
@@ -193,15 +255,14 @@
       return;
     }
 
-    // If any frame signals MODAL_READY, deliver the staged batch to it and broadcast
+    // Only deliver dropped File objects to the verified extension modal frame that sent MODAL_READY
     if (data[HANDOFF_NS] === 'MODAL_READY') {
-      if (event.source && deliverPendingBatchToFrame(event.source)) {
-        broadcastToAllFrames({
-          [HANDOFF_NS]: 'DROPPED_FILES',
-          folderPath: pendingBatch.folderPath,
-          aemAuthorUrl: pendingBatch.aemAuthorUrl,
-          items: pendingBatch.items
-        });
+      if (!isTrustedExtensionOrigin(event.origin) || !event.source) return;
+      lastKnownModal = {
+        win: event.source,
+        origin: event.origin
+      };
+      if (deliverPendingBatchToFrame(event.source, event.origin)) {
         setTimeout(() => {
           pendingBatch = null;
         }, 1500);
@@ -503,27 +564,23 @@
       items
     };
 
-    // 0. Sync pendingBatch across all frames so whichever frame receives MODAL_READY can answer
-    broadcastToAllFrames({
+    // 0. Sync pendingBatch ONLY to trusted Adobe host frames (never '*' to third-party frames)
+    broadcastToTrustedHostFrames({
       [HANDOFF_NS]: 'STAGE_BATCH',
       folderPath,
       aemAuthorUrl,
       items
     });
 
-    // 1. Broadcast DROPPED_FILES in case the Guided Upload modal is already open
-    broadcastToAllFrames({
-      [HANDOFF_NS]: 'DROPPED_FILES',
-      folderPath,
-      aemAuthorUrl,
-      items
-    });
+    // 1. If the Guided Upload modal is already open, send DROPPED_FILES exclusively to its verified origin
+    if (lastKnownModal && lastKnownModal.win && isTrustedExtensionOrigin(lastKnownModal.origin)) {
+      deliverPendingBatchToFrame(lastKnownModal.win, lastKnownModal.origin);
+    }
 
-    // 2. Broadcast OPEN_MODAL_FROM_DROP to all frames (reaches ExtensionRegistration.js iframe even inside Shadow DOM)
+    // 2. Broadcast metadata-only OPEN_MODAL_FROM_DROP (contains zero File objects) to open the modal
     broadcastToAllFrames({
       [HANDOFF_NS]: 'OPEN_MODAL_FROM_DROP',
-      folderPath,
-      aemAuthorUrl
+      folderPath
     });
 
     // 3. Also attempt clicking the "Add assets" button in this frame if present

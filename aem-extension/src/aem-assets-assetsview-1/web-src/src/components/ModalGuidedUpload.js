@@ -17,7 +17,7 @@ import {
   Divider
 } from '@adobe/react-spectrum';
 
-import { extensionId, HANDOFF_MESSAGE_NS, STORAGE_KEY_CTX } from './Constants';
+import { extensionId, HANDOFF_MESSAGE_NS, STORAGE_KEY_CTX, isTrustedMessageOrigin } from './Constants';
 import FolderDropzone, { shouldIgnoreFile } from './FolderDropzone';
 import DynamicSchemaForm, { humanTitleFromFileName } from './DynamicSchemaForm';
 import { validateMetadataValues } from './ValidationRules';
@@ -384,7 +384,8 @@ export default function ModalGuidedUpload () {
   // Cross-Frame Chrome Extension Drop Handoff Listener
   useEffect(() => {
     const onMessage = (event) => {
-      const data = event && event.data;
+      if (!event || !isTrustedMessageOrigin(event.origin)) return;
+      const data = event.data;
       if (!data || data[HANDOFF_MESSAGE_NS] !== 'DROPPED_FILES') return;
 
       if (data.folderPath && data.folderPath.startsWith('/content/dam')) {

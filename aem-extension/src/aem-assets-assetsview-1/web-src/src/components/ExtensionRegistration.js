@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { Text } from '@adobe/react-spectrum';
 import { register } from '@adobe/uix-guest';
-import { extensionId, HANDOFF_MESSAGE_NS, STORAGE_KEY_CTX } from './Constants';
+import { extensionId, HANDOFF_MESSAGE_NS, STORAGE_KEY_CTX, isTrustedMessageOrigin } from './Constants';
 
 function findAemAuthorUrl (...sources) {
   const seen = new Set();
@@ -89,7 +89,8 @@ function ExtensionRegistration () {
     };
 
     const onWindowMessage = (event) => {
-      const data = event && event.data;
+      if (!event || !isTrustedMessageOrigin(event.origin)) return;
+      const data = event.data;
       if (!data || typeof data !== 'object') return;
       if (data[HANDOFF_MESSAGE_NS] === 'OPEN_MODAL_FROM_DROP') {
         openGuidedUploadModal({
