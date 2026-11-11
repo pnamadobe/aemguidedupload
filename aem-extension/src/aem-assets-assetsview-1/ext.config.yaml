@@ -18,6 +18,7 @@ runtimeManifest:
           inputs:
             LOG_LEVEL: info
             AEM_AUTHOR_URL: $AEM_AUTHOR_URL
+            AEM_MULTI_TENANT: $AEM_MULTI_TENANT
           limits:
             timeout: 120000
             memorySize: 256
