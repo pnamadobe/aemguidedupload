@@ -247,6 +247,20 @@
       return;
     }
 
+    if (data[HANDOFF_NS] === 'PING_CHROME_GUARD') {
+      if (!isTrustedExtensionOrigin(event.origin) || !event.source) return;
+      try {
+        event.source.postMessage(
+          {
+            [HANDOFF_NS]: 'PONG_CHROME_GUARD',
+            version: '0.3.1'
+          },
+          event.origin
+        );
+      } catch (e) { /* ignore */ }
+      return;
+    }
+
     // Only deliver dropped File objects to the verified extension modal frame that sent MODAL_READY
     if (data[HANDOFF_NS] === 'MODAL_READY') {
       if (!isTrustedExtensionOrigin(event.origin) || !event.source) return;
@@ -254,6 +268,15 @@
         win: event.source,
         origin: event.origin
       };
+      try {
+        event.source.postMessage(
+          {
+            [HANDOFF_NS]: 'PONG_CHROME_GUARD',
+            version: '0.3.1'
+          },
+          event.origin
+        );
+      } catch (e) { /* ignore */ }
       if (deliverPendingBatchToFrame(event.source, event.origin)) {
         setTimeout(() => {
           pendingBatch = null;

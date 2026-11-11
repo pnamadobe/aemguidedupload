@@ -39,6 +39,7 @@ function normalizeDamFolderPath (resource) {
 function ExtensionRegistration () {
   useEffect(() => {
     let activeGuestConnection = null;
+    let chromeGuardDetected = false;
 
     const openGuidedUploadModal = async ({ context, resource, folderOverride, source = 'addAssets' }) => {
       if (!activeGuestConnection) return;
@@ -102,7 +103,12 @@ function ExtensionRegistration () {
       if (!event || !isTrustedMessageOrigin(event.origin)) return;
       const data = event.data;
       if (!data || typeof data !== 'object') return;
+      if (data[HANDOFF_MESSAGE_NS] === 'PONG_CHROME_GUARD') {
+        chromeGuardDetected = true;
+        return;
+      }
       if (data[HANDOFF_MESSAGE_NS] === 'OPEN_MODAL_FROM_DROP') {
+        chromeGuardDetected = true;
         openGuidedUploadModal({
           context: 'assets',
           folderOverride: data.folderPath || '/content/dam',
@@ -192,6 +198,27 @@ function ExtensionRegistration () {
       });
 
       activeGuestConnection = guestConnection;
+
+      // Ping for the companion Chrome extension and warn the user in AEM Assets View if missing
+      const sendPing = () => {
+        try {
+          const msg = { [HANDOFF_MESSAGE_NS]: 'PING_CHROME_GUARD' };
+          if (window.parent && window.parent !== window) window.parent.postMessage(msg, '*');
+          if (window.top && window.top !== window && window.top !== window.parent) window.top.postMessage(msg, '*');
+        } catch (e) { /* ignore */ }
+      };
+      sendPing();
+      setTimeout(sendPing, 400);
+      setTimeout(() => {
+        if (!chromeGuardDetected && activeGuestConnection && activeGuestConnection.host?.toast?.display) {
+          try {
+            activeGuestConnection.host.toast.display({
+              variant: 'negative',
+              message: 'AEM Upload Guardrail Chrome Extension is not active in this browser window. Enable the companion extension (or "Allow in Incognito") to enforce drag-and-drop upload guardrails.'
+            });
+          } catch (e) { /* ignore */ }
+        }
+      }, 1500);
     };
 
     init().catch(console.error);

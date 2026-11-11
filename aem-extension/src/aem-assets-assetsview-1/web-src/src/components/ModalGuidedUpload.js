@@ -294,6 +294,7 @@ export default function ModalGuidedUpload () {
   const [queuedFiles, setQueuedFiles] = useState([]);
   const [normalizeSubfolders, setNormalizeSubfolders] = useState(true);
   const [handoffSource, setHandoffSource] = useState(null);
+  const [chromePluginDetected, setChromePluginDetected] = useState(null);
 
   // Schema & Metadata state
   const [schemaLoading, setSchemaLoading] = useState(false);
@@ -405,12 +406,23 @@ export default function ModalGuidedUpload () {
     return () => { mounted = false; };
   }, []);
 
-  // Cross-Frame Chrome Extension Drop Handoff Listener
+  // Cross-Frame Chrome Extension Drop Handoff & Presence Listener
   useEffect(() => {
+    let detected = false;
     const onMessage = (event) => {
       if (!event || !isTrustedMessageOrigin(event.origin)) return;
       const data = event.data;
-      if (!data || data[HANDOFF_MESSAGE_NS] !== 'DROPPED_FILES') return;
+      if (!data || typeof data !== 'object') return;
+
+      if (data[HANDOFF_MESSAGE_NS] === 'PONG_CHROME_GUARD') {
+        detected = true;
+        setChromePluginDetected(true);
+        return;
+      }
+
+      if (data[HANDOFF_MESSAGE_NS] !== 'DROPPED_FILES') return;
+      detected = true;
+      setChromePluginDetected(true);
 
       if (data.folderPath && data.folderPath.startsWith('/content/dam')) {
         setFolderPath(data.folderPath);
@@ -467,11 +479,17 @@ export default function ModalGuidedUpload () {
     notifyReady();
     const t1 = setTimeout(notifyReady, 250);
     const t2 = setTimeout(notifyReady, 750);
+    const tWarn = setTimeout(() => {
+      if (!detected) {
+        setChromePluginDetected(false);
+      }
+    }, 1000);
 
     return () => {
       window.removeEventListener('message', onMessage);
       clearTimeout(t1);
       clearTimeout(t2);
+      clearTimeout(tWarn);
     };
   }, []);
 
@@ -896,6 +914,17 @@ export default function ModalGuidedUpload () {
               </span>
             </Flex>
           </div>
+
+          {chromePluginDetected === false && (
+            <div className="gu-card-subtle" style={{ borderColor: '#d7373f' }}>
+              <Flex alignItems="center" gap="size-100">
+                <Alert size="S" UNSAFE_style={{ color: '#d7373f', flexShrink: 0 }} />
+                <Text UNSAFE_style={{ fontSize: '12.5px', color: '#d7373f', fontWeight: 500 }}>
+                  <b>Companion Chrome Extension Not Active:</b> Browse-grid drag-and-drop protection and automatic folder refresh are inactive in this window. Install or enable the <b>AEM Guided Upload — Drag-and-Drop Guardrail</b> Chrome extension (and enable <i>Allow in Incognito</i> if using Incognito).
+                </Text>
+              </Flex>
+            </div>
+          )}
 
           {schemaError && (
             <StatusLight variant="notice">
