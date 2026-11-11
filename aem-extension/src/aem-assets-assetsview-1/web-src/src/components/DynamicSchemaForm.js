@@ -147,7 +147,6 @@ function PerAssetTitleField ({
 
 function TagPickerField ({ field, value = [], onChange, availableTags = [], errorMessage }) {
   const [filterText, setFilterText] = useState('');
-  const [customTagInput, setCustomTagInput] = useState('');
   const selectedIds = Array.isArray(value) ? value : (value ? [String(value)] : []);
 
   const rootTag = field.rootTag || null;
@@ -161,6 +160,8 @@ function TagPickerField ({ field, value = [], onChange, availableTags = [], erro
       ? availableTags.filter((t) => String(t.id || '').startsWith(rootPrefix))
       : availableTags);
 
+  const allowedTagIds = new Set(candidatePool.map((t) => t.id));
+
   const filteredTags = candidatePool
     .filter((t) => {
       if (selectedIds.includes(t.id)) return false;
@@ -168,17 +169,11 @@ function TagPickerField ({ field, value = [], onChange, availableTags = [], erro
       const q = filterText.toLowerCase();
       return t.label.toLowerCase().includes(q) || t.id.toLowerCase().includes(q);
     })
-    .slice(0, 35);
+    .slice(0, 50);
 
   const addTag = (tagId) => {
-    let clean = String(tagId || '').trim();
-    if (!clean) return;
-    // If field has a rootTag and user typed a bare child slug (e.g. "running"), prefix it automatically
-    if (rootPrefix && !clean.includes(':')) {
-      clean = rootPrefix.endsWith(':')
-        ? `${rootPrefix}${clean.replace(/^\/+/, '')}`
-        : `${rootPrefix}/${clean.replace(/^\/+/, '')}`;
-    }
+    const clean = String(tagId || '').trim();
+    if (!clean || !allowedTagIds.has(clean)) return;
     if (selectedIds.includes(clean)) return;
     onChange([...selectedIds, clean]);
   };
@@ -234,43 +229,27 @@ function TagPickerField ({ field, value = [], onChange, availableTags = [], erro
         <Flex gap="size-100" wrap alignItems="end">
           <TextField
             label={rootTag ? `Filter "${rootTag.name}" Tags` : 'Filter AEM Taxonomy Tags'}
-            placeholder="Search tags..."
+            placeholder="Search existing tags..."
             value={filterText}
             onChange={setFilterText}
             width="size-3000"
           />
-          {filteredTags.length > 0 && (
-            <Picker
-              label="Select Taxonomy Tag"
-              placeholder={`Choose from ${candidatePool.length} allowed tag(s)...`}
-              items={filteredTags}
-              onSelectionChange={(key) => {
-                if (key) addTag(String(key));
-              }}
-              width="size-3600"
-            >
-              {(item) => <Item key={item.id}>{item.label}</Item>}
-            </Picker>
-          )}
-          <Flex gap="size-75" alignItems="end">
-            <TextField
-              label={rootPrefix ? `Or add under ${rootPrefix}` : 'Or add tag ID (namespace:tag)'}
-              placeholder={rootPrefix ? `${rootPrefix}example` : 'e.g. region:amer'}
-              value={customTagInput}
-              onChange={setCustomTagInput}
-              width="size-2400"
-            />
-            <ActionButton
-              onPress={() => {
-                if (customTagInput.trim()) {
-                  addTag(customTagInput.trim());
-                  setCustomTagInput('');
-                }
-              }}
-            >
-              Add Tag
-            </ActionButton>
-          </Flex>
+          <Picker
+            label="Select Taxonomy Tag"
+            placeholder={
+              filteredTags.length > 0
+                ? `Choose from ${candidatePool.length} existing tag(s)...`
+                : 'No matching taxonomy tags'
+            }
+            isDisabled={filteredTags.length === 0}
+            items={filteredTags}
+            onSelectionChange={(key) => {
+              if (key) addTag(String(key));
+            }}
+            width="size-3600"
+          >
+            {(item) => <Item key={item.id}>{item.label}</Item>}
+          </Picker>
         </Flex>
 
         {errorMessage && (
