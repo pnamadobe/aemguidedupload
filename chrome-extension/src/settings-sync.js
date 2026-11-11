@@ -4,6 +4,14 @@
   if (globalThis.__guSettingsSync) return;
   globalThis.__guSettingsSync = true;
 
+  const host = (window.location && window.location.hostname) || '';
+  if (
+    !/^experience(?:-stage)?\.adobe\.com$/i.test(host) &&
+    !/^author-[a-z0-9-]+\.adobeaemcloud\.com$/i.test(host)
+  ) {
+    return;
+  }
+
   const DEFAULTS = {
     enabled: true,
     handoffOnDrop: true

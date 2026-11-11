@@ -131,7 +131,13 @@
     return out;
   }
 
+  let cachedAddAssetsBtn = null;
+
   function findAndClickAddAssetsButton () {
+    if (cachedAddAssetsBtn && cachedAddAssetsBtn.isConnected) {
+      cachedAddAssetsBtn.click();
+      return true;
+    }
     const allElements = queryAllDeep(document);
     for (const el of allElements) {
       const tag = (el.tagName || '').toLowerCase();
@@ -149,6 +155,7 @@
       ).toLowerCase();
 
       if (/^add\s+assets$/i.test(label) || dataId === 'addassets' || dataId === 'add-assets') {
+        cachedAddAssetsBtn = el;
         el.click();
         return true;
       }
