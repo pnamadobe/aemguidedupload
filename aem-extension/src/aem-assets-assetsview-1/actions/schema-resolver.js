@@ -9,12 +9,19 @@
  * governance fields plus naming tokens.
  */
 
-const { encodeDamPath, fetchWithTimeout } = require('./utils')
+const crypto = require('crypto')
+const { encodeDamPath, fetchWithTimeout, mapWithConcurrency } = require('./utils')
 
 const SCHEMA_CACHE_TTL_MS = 2 * 60 * 1000
 const TAGS_CACHE_TTL_MS = 5 * 60 * 1000
+const MAX_PROMOTED_PER_CUSTOM_TAB = 8
 const schemaCache = new Map()
 const taxonomyTagsCache = new Map()
+
+function tokenCacheScope (token = '') {
+  if (!token) return 'anon'
+  return crypto.createHash('sha256').update(String(token)).digest('hex').slice(0, 12)
+}
 
 function clearSchemaResolverCache () {
   schemaCache.clear()
@@ -68,11 +75,7 @@ const SYSTEM_PROP_PREFIXES = [
 // and assigns an AI title during asset processing.
 const CORE_GOVERNANCE_PROPS = new Set([
   'xdm:campaignName',
-  'pn:campaignTitle',
-  'dam:pnCampaignName',
   'product:brand',
-  'pn:brand',
-  'pnam:brand',
   'xcm:keywords',
   'dc:license',
   'drm:channelAllowed',
@@ -345,6 +348,7 @@ function resolveFieldRequirements (fields) {
 
   let expirationPromoted = false
   const primaryExpProp = EXPIRATION_PROPS.find((p) => fields.some((f) => f.property === p))
+  const promotedPerTab = {}
 
   const updated = fields.map((f) => {
     const tabLower = (f.tab || '').toLowerCase()
@@ -353,11 +357,23 @@ function resolveFieldRequirements (fields) {
     const isPrimaryExpiration = !expirationPromoted && primaryExpProp && f.property === primaryExpProp
     if (isPrimaryExpiration) expirationPromoted = true
 
-    if (isCustomDomainTab || isCoreGovernance || isPrimaryExpiration) {
+    if (isCoreGovernance || isPrimaryExpiration) {
       return {
         ...f,
         required: true,
-        requiredSource: isCustomDomainTab ? `vertical-tab:${f.tab}` : 'governance-policy'
+        requiredSource: 'governance-policy'
+      }
+    }
+
+    if (isCustomDomainTab) {
+      const count = promotedPerTab[tabLower] || 0
+      if (count < MAX_PROMOTED_PER_CUSTOM_TAB) {
+        promotedPerTab[tabLower] = count + 1
+        return {
+          ...f,
+          required: true,
+          requiredSource: `vertical-tab:${f.tab}`
+        }
       }
     }
     return f
@@ -391,8 +407,6 @@ function buildNamingTokensAndPattern (fields, schemaName = 'default') {
       .replace(/^air/i, '')
       .replace(/^qsr/i, '')
       .replace(/^fin/i, '')
-      .replace(/^hbo/i, '')
-      .replace(/^pn/i, '')
     const candidate = (cleaned || bare || label)
       .replace(/[^a-zA-Z0-9]/g, '')
     return candidate ? candidate.charAt(0).toLowerCase() + candidate.slice(1) : 'field'
@@ -637,7 +651,7 @@ async function discoverFolderSchemaAssignment (author, token, folderPath) {
  */
 async function resolveFolderSchema (author, token, folderPath) {
   const cleanFolder = String(folderPath || '/content/dam').replace(/\/+$/, '') || '/content/dam'
-  const cacheKey = `${author}|${cleanFolder}`
+  const cacheKey = `${author}|${tokenCacheScope(token)}|${cleanFolder}`
   const cached = schemaCache.get(cacheKey)
   if (cached && Date.now() < cached.expiresAt) {
     return cached.value
@@ -807,18 +821,34 @@ async function fetchTagsUnderRootPath (author, token, rootTag) {
 }
 
 /**
- * Fetches AEM taxonomy tags from `/content/cq:tags.3.json` so the Tag Picker field in the
+ * Fetches AEM taxonomy tags from `/content/cq:tags` so the Tag Picker field in the
  * Guided Upload modal can display and search real taxonomy tag IDs (`namespace:tag`).
+ * Automatically falls back to per-namespace `.2.json` traversal when `/content/cq:tags.3.json`
+ * hits Sling's 1,000-node limit (`HTTP 300 Multiple Choices`) on large enterprise taxonomies.
  */
 async function fetchTaxonomyTags (author, token) {
-  const cached = taxonomyTagsCache.get(author)
+  const cacheKey = `${author}|${tokenCacheScope(token)}`
+  const cached = taxonomyTagsCache.get(cacheKey)
   if (cached && Date.now() < cached.expiresAt) {
     return cached.value
   }
 
-  const data = await fetchJsonSafe(`${author}/content/cq:tags.3.json`, token)
+  let data = await fetchJsonSafe(`${author}/content/cq:tags.3.json`, token)
+
+  // Enterprise scale fallback: if .3.json hit Sling's node limit, walk namespaces individually
   if (!data || typeof data !== 'object') {
-    return []
+    const rootList = await fetchJsonSafe(`${author}/content/cq:tags.1.json`, token)
+    if (!rootList || typeof rootList !== 'object') {
+      return []
+    }
+    const nsKeys = Object.keys(rootList).filter(
+      (k) => rootList[k] && typeof rootList[k] === 'object' && !k.startsWith('jcr:') && !k.startsWith('rep:') && !k.startsWith('sling:')
+    )
+    const nsEntries = await mapWithConcurrency(nsKeys, 6, async (nsKey) => {
+      const nsData = await fetchJsonSafe(`${author}/content/cq:tags/${encodeURIComponent(nsKey)}.2.json`, token)
+      return [nsKey, nsData || rootList[nsKey]]
+    })
+    data = Object.fromEntries(nsEntries)
   }
 
   const tags = []
@@ -849,7 +879,7 @@ async function fetchTaxonomyTags (author, token) {
   }
 
   const sorted = tags.sort((a, b) => a.label.localeCompare(b.label))
-  taxonomyTagsCache.set(author, {
+  taxonomyTagsCache.set(cacheKey, {
     value: sorted,
     expiresAt: Date.now() + TAGS_CACHE_TTL_MS
   })

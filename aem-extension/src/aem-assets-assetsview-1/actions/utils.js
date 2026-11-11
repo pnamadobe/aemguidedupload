@@ -22,6 +22,7 @@ function userBearer (params = {}) {
 }
 
 const AUTHOR_HOST_RE = /^https:\/\/author-[a-z0-9-]+\.adobeaemcloud\.com$/i
+const CLOUD_MANAGER_AUTHOR_RE = /^https:\/\/author-p\d+-e\d+\.adobeaemcloud\.com$/i
 
 function normalizeAuthorUrl (raw) {
   const s = String(raw || '').trim().replace(/\/+$/, '')
@@ -35,9 +36,17 @@ function normalizeAuthorUrl (raw) {
   return withScheme
 }
 
+function isMultiTenantExchangeMode (params = {}) {
+  return (
+    params.AEM_MULTI_TENANT === true ||
+    String(params.AEM_MULTI_TENANT || '').trim().toLowerCase() === 'true' ||
+    String(params.AEM_AUTHOR_URL || '').trim() === '*'
+  )
+}
+
 function parseAllowedAuthors (params = {}) {
   const rawList = [params.AEM_AUTHOR_URL, params.AEM_ALLOWED_AUTHORS]
-    .filter((v) => typeof v === 'string' && v.trim())
+    .filter((v) => typeof v === 'string' && v.trim() && v.trim() !== '*')
     .join(',')
   if (!rawList) return []
   const seen = new Set()
@@ -58,7 +67,21 @@ async function resolveAemContext (params = {}) {
     throw err
   }
 
+  const multiTenant = isMultiTenantExchangeMode(params)
   const allowedAuthors = parseAllowedAuthors(params)
+
+  if (multiTenant) {
+    const candidate = (typeof params.aemAuthorUrl === 'string' && params.aemAuthorUrl.trim())
+      ? normalizeAuthorUrl(params.aemAuthorUrl)
+      : (allowedAuthors[0] || '')
+    if (!candidate || !CLOUD_MANAGER_AUTHOR_RE.test(candidate)) {
+      const err = new Error('Invalid or missing AEM Cloud Service Author URL (expected https://author-p<program>-e<env>.adobeaemcloud.com).')
+      err.status = 400
+      throw err
+    }
+    return { author: candidate, token: callerToken, authSource: 'user' }
+  }
+
   if (!allowedAuthors.length) {
     const err = new Error('Server configuration error: AEM_AUTHOR_URL must be configured on the Runtime action.')
     err.status = 500

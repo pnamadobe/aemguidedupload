@@ -38,12 +38,18 @@ function readInitialContext () {
 
   try {
     const stored = JSON.parse(localStorage.getItem(STORAGE_KEY_CTX) || '{}');
+    const storedAuthor = typeof stored.aemAuthorUrl === 'string' &&
+      /^https:\/\/author-p\d+-e\d+\.adobeaemcloud\.com$/i.test(stored.aemAuthorUrl.trim())
+      ? stored.aemAuthorUrl.trim()
+      : '';
     return {
-      folderPath: urlFolder || stored.folderPath || '/content/dam'
+      folderPath: urlFolder || stored.folderPath || '/content/dam',
+      aemAuthorUrl: storedAuthor
     };
   } catch (e) {
     return {
-      folderPath: urlFolder || '/content/dam'
+      folderPath: urlFolder || '/content/dam',
+      aemAuthorUrl: ''
     };
   }
 }
@@ -134,9 +140,9 @@ function createClientFallbackSchema (folderPath = '/content/dam') {
       requiredSource: 'governance-policy',
       placeholder: 'Select License Agreement',
       options: [
-        { id: '/content/dam/licenses/jll/DAM_Internal_User_Terms_US_v4.2.pdf', name: 'DAM Internal User Terms of Use' },
-        { id: '/content/dam/licenses/jll/DAM_External_Partner_License_US_v3.7.pdf', name: 'DAM External Partner License — US' },
-        { id: '/content/dam/licenses/jll/DAM_External_Partner_Licence_EMEA_v3.7.pdf', name: 'DAM External Partner Licence — EMEA' }
+        { id: 'internal-use', name: 'DAM Internal User Terms of Use' },
+        { id: 'external-partner-us', name: 'DAM External Partner License — US' },
+        { id: 'external-partner-emea', name: 'DAM External Partner Licence — EMEA' }
       ]
     },
     {
@@ -279,7 +285,7 @@ export default function ModalGuidedUpload () {
   const [folderPath, setFolderPath] = useState(initialCtx.folderPath || '/content/dam');
   const [folderInput, setFolderInput] = useState(initialCtx.folderPath || '/content/dam');
   const [editingFolder, setEditingFolder] = useState(false);
-  const [aemAuthorUrl, setAemAuthorUrl] = useState('');
+  const [aemAuthorUrl, setAemAuthorUrl] = useState(initialCtx.aemAuthorUrl || '');
 
   // Wizard step: 1 = Files & Folder Tree, 2 = Folder Metadata & Rights, 3 = Naming & Commit
   const [step, setStep] = useState(1);

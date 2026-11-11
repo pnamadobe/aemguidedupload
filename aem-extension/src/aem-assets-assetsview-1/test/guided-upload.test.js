@@ -11,7 +11,9 @@ const {
   parseAdminViewSchema,
   resolveFieldRequirements,
   buildNamingTokensAndPattern,
-  resolveFolderSchema
+  resolveFolderSchema,
+  fetchTaxonomyTags,
+  clearSchemaResolverCache
 } = require('../actions/schema-resolver');
 
 const {
@@ -693,5 +695,71 @@ describe('5. Security Guardrails: Authentication & Server-Pinned AEM Author Allo
     const items = [10, 20, 30, 40, 50];
     const mapped = await mapWithConcurrency(items, 2, async (x, idx) => `${idx}:${x * 2}`);
     expect(mapped).toEqual(['0:20', '1:40', '2:60', '3:80', '4:100']);
+  });
+
+  test('Exchange Readiness: supports multi-tenant Exchange mode and falls back to per-namespace tag traversal when .3.json hits Sling node limit', async () => {
+    // 1. Multi-tenant Exchange mode (AEM_AUTHOR_URL: '*') accepts valid Cloud Manager author-p<digits>-e<digits>
+    const mtCtx = await resolveAemContext({
+      AEM_AUTHOR_URL: '*',
+      __ow_headers: { authorization: 'Bearer customer-ims-token' },
+      aemAuthorUrl: 'https://author-p12345-e67890.adobeaemcloud.com'
+    });
+    expect(mtCtx.author).toBe('https://author-p12345-e67890.adobeaemcloud.com');
+
+    // Rejects non-Cloud-Manager vanity subdomains in multi-tenant mode
+    await expect(
+      resolveAemContext({
+        AEM_AUTHOR_URL: '*',
+        __ow_headers: { authorization: 'Bearer customer-ims-token' },
+        aemAuthorUrl: 'https://author-custom-vanity.adobeaemcloud.com'
+      })
+    ).rejects.toMatchObject({ status: 400 });
+
+    // 2. Enterprise tag fallback when /content/cq:tags.3.json returns HTTP 300 (null)
+    clearSchemaResolverCache();
+    const origFetch = global.fetch;
+    global.fetch = async (url) => {
+      if (url.endsWith('/content/cq:tags.3.json')) {
+        return { ok: false, status: 300, text: async () => '' };
+      }
+      if (url.endsWith('/content/cq:tags.1.json')) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            'jcr:primaryType': 'cq:Tag',
+            region: { 'jcr:primaryType': 'cq:Tag', 'jcr:title': 'Region' }
+          })
+        };
+      }
+      if (url.endsWith('/content/cq:tags/region.2.json')) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            'jcr:primaryType': 'cq:Tag',
+            'jcr:title': 'Region',
+            amer: { 'jcr:primaryType': 'cq:Tag', 'jcr:title': 'Americas' }
+          })
+        };
+      }
+      return { ok: false, status: 404, text: async () => '' };
+    };
+
+    try {
+      const tags = await fetchTaxonomyTags('https://author-p12345-e67890.adobeaemcloud.com', 'customer-ims-token');
+      expect(tags).toEqual([
+        {
+          id: 'region:amer',
+          label: 'Region / Americas',
+          namespace: 'region',
+          namespaceTitle: 'Region',
+          title: 'Americas'
+        }
+      ]);
+    } finally {
+      global.fetch = origFetch;
+      clearSchemaResolverCache();
+    }
   });
 });

@@ -43,7 +43,13 @@ function ExtensionRegistration () {
     const openGuidedUploadModal = async ({ context, resource, folderOverride, source = 'addAssets' }) => {
       if (!activeGuestConnection) return;
       const folderPath = folderOverride || normalizeDamFolderPath(resource);
-      let aemAuthorUrl = findAemAuthorUrl(context, resource);
+      let aemAuthorUrl = findAemAuthorUrl(
+        context,
+        resource,
+        activeGuestConnection.sharedContext && activeGuestConnection.sharedContext.get('aemHost'),
+        activeGuestConnection.sharedContext && activeGuestConnection.sharedContext.get('repoId'),
+        activeGuestConnection.sharedContext && activeGuestConnection.sharedContext.get('auth')
+      );
       if (!aemAuthorUrl && activeGuestConnection.host?.discovery?.getAemHost) {
         try {
           const discovered = await Promise.race([
@@ -69,6 +75,7 @@ function ExtensionRegistration () {
       try {
         localStorage.setItem(STORAGE_KEY_CTX, JSON.stringify({
           folderPath: ctxPayload.folderPath,
+          aemAuthorUrl: ctxPayload.aemAuthorUrl,
           context: ctxPayload.context,
           source: ctxPayload.source,
           openedAt: ctxPayload.openedAt
@@ -104,6 +111,16 @@ function ExtensionRegistration () {
         return;
       }
       if (data[HANDOFF_MESSAGE_NS] === 'REFRESH_FOLDER_VIEW') {
+        if (activeGuestConnection && activeGuestConnection.host?.toast?.display) {
+          const count = Number(data.completedCount) || 1;
+          const dest = data.folderPath || '/content/dam';
+          try {
+            activeGuestConnection.host.toast.display({
+              variant: 'positive',
+              message: `Uploaded ${count} governed asset${count === 1 ? '' : 's'} to ${dest}`
+            });
+          } catch (e) { /* ignore */ }
+        }
         const relay = () => {
           try {
             if (window.parent && window.parent !== window) window.parent.postMessage(data, '*');
