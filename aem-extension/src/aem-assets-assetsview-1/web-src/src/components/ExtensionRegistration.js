@@ -40,10 +40,10 @@ function ExtensionRegistration () {
   useEffect(() => {
     let activeGuestConnection = null;
 
-    const openGuidedUploadModal = async ({ context, resource, folderOverride, authorOverride, source = 'addAssets' }) => {
+    const openGuidedUploadModal = async ({ context, resource, folderOverride, source = 'addAssets' }) => {
       if (!activeGuestConnection) return;
       const folderPath = folderOverride || normalizeDamFolderPath(resource);
-      let aemAuthorUrl = authorOverride || findAemAuthorUrl(context, resource);
+      let aemAuthorUrl = findAemAuthorUrl(context, resource);
       if (!aemAuthorUrl && activeGuestConnection.host?.discovery?.getAemHost) {
         try {
           const discovered = await activeGuestConnection.host.discovery.getAemHost();
@@ -64,14 +64,18 @@ function ExtensionRegistration () {
       };
 
       try {
-        localStorage.setItem(STORAGE_KEY_CTX, JSON.stringify(ctxPayload));
+        localStorage.setItem(STORAGE_KEY_CTX, JSON.stringify({
+          folderPath: ctxPayload.folderPath,
+          context: ctxPayload.context,
+          source: ctxPayload.source,
+          openedAt: ctxPayload.openedAt
+        }));
       } catch (e) {
         // ignore storage quota errors
       }
 
       const qs = new URLSearchParams({
         folder: ctxPayload.folderPath,
-        aemAuthorUrl: ctxPayload.aemAuthorUrl,
         source: ctxPayload.source
       }).toString();
 
@@ -90,7 +94,6 @@ function ExtensionRegistration () {
       openGuidedUploadModal({
         context: 'assets',
         folderOverride: data.folderPath || '/content/dam',
-        authorOverride: data.aemAuthorUrl || '',
         source: 'chrome-dnd-guard'
       }).catch(console.error);
     };

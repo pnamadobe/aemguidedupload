@@ -22,7 +22,7 @@ guidedupload/
 │   └── src/aem-assets-assetsview-1/
 │       ├── ext.config.yaml
 │       ├── actions/
-│       │   ├── utils.js                       # IMS Bearer + Service Credential auth & DAM path validation
+│       │   ├── utils.js                       # IMS Bearer auth, server-pinned AEM Author allowlist & DAM path validation
 │       │   ├── schema-resolver.js             # Folder ancestor walk + Assets View Form & Admin Schema parser
 │       │   ├── upload-broker.js               # Subfolder tree creation + initiate/complete + metadata normalization
 │       │   └── guided-upload-api/index.js     # Web action router (resolveSchema, listTags, initiate, complete)
@@ -72,3 +72,16 @@ npm test
 4. Drag any file or nested folder onto the AEM Assets View browse grid:
    - The native ungoverned dropzone is blocked in the capture phase.
    - The **Guided Upload** modal opens automatically with your dropped files and subfolder hierarchy pre-loaded.
+
+---
+
+## Security & Authentication Architecture
+
+- **Mandatory IMS User Authentication (C1)**:
+  - The Adobe I/O Runtime action (`guided-upload-api`) enforces `require-adobe-auth: true` at the gateway and validates the caller's `Authorization: Bearer <token>` HTTP header inside `resolveAemContext()`.
+  - Static service-account (`AEM_SC_JSON`), developer-token (`AEM_DEV_TOKEN`), and request-body token (`userToken`) fallbacks are excluded so every DAM read/write executes strictly under the signed-in user's AEM permissions.
+  - The modal waits for the UIX guest connection (`attach()`) to settle before invoking `guided-upload-api` and passes `Authorization` (and `x-gw-ims-org-id` when provided by the host) exclusively via HTTP headers.
+- **Server-Pinned AEM Author Allowlist (C2)**:
+  - `AEM_AUTHOR_URL` is bound as a finalized (`final: true`) Runtime action input in `ext.config.yaml` (supports a single AEM Author origin or a comma-separated allowlist via `AEM_AUTHOR_URL` / `AEM_ALLOWED_AUTHORS`).
+  - All backend operations default to the server-pinned `AEM_AUTHOR_URL` and reject any request supplying a non-allowlisted `aemAuthorUrl` with `403 Forbidden`, preventing Bearer token redirection/SSRF to foreign `author-p*-e*.adobeaemcloud.com` instances.
+  - The web UI never reads or trusts `aemAuthorUrl` from URL query parameters, `localStorage`, or `window.postMessage` payloads.

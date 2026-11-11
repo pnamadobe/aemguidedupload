@@ -30,18 +30,15 @@ function readInitialContext () {
   const qIdx = hash.indexOf('?');
   const sp = new URLSearchParams(qIdx >= 0 ? hash.slice(qIdx + 1) : window.location.search);
   const urlFolder = sp.get('folder') || '';
-  const urlAuthor = sp.get('aemAuthorUrl') || '';
 
   try {
     const stored = JSON.parse(localStorage.getItem(STORAGE_KEY_CTX) || '{}');
     return {
-      folderPath: urlFolder || stored.folderPath || '/content/dam',
-      aemAuthorUrl: urlAuthor || stored.aemAuthorUrl || ''
+      folderPath: urlFolder || stored.folderPath || '/content/dam'
     };
   } catch (e) {
     return {
-      folderPath: urlFolder || '/content/dam',
-      aemAuthorUrl: urlAuthor || ''
+      folderPath: urlFolder || '/content/dam'
     };
   }
 }
@@ -53,21 +50,38 @@ function resolveActionUrl (actionName = 'guided-upload-api') {
   return hit ? hit[1] : null;
 }
 
-async function getHostUserToken (gc) {
-  if (!gc) return '';
+async function getHostAuthHeaders (gc) {
+  if (!gc) return {};
+  let token = '';
+  let imsOrg = '';
   try {
     const info = await gc.host.auth.getIMSInfo();
-    if (info && info.accessToken) return info.accessToken;
+    if (info) {
+      if (info.accessToken) token = info.accessToken;
+      else if (info.token) token = info.token;
+      if (info.imsOrg) imsOrg = info.imsOrg;
+      else if (info.org) imsOrg = info.org;
+    }
   } catch (e) {
     // ignore
   }
   try {
     const shared = gc.sharedContext && gc.sharedContext.get('auth');
-    if (shared && shared.imsToken) return shared.imsToken;
+    if (shared) {
+      if (!token && (shared.imsToken || shared.accessToken)) {
+        token = shared.imsToken || shared.accessToken;
+      }
+      if (!imsOrg && (shared.imsOrg || shared.org)) {
+        imsOrg = shared.imsOrg || shared.org;
+      }
+    }
   } catch (e) {
     // ignore
   }
-  return '';
+  const headers = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (imsOrg) headers['x-gw-ims-org-id'] = imsOrg;
+  return headers;
 }
 
 function createClientFallbackSchema (folderPath = '/content/dam') {
@@ -247,11 +261,12 @@ let nextFileSeqId = 1;
 export default function ModalGuidedUpload () {
   const initialCtx = useMemo(() => readInitialContext(), []);
   const [guestConnection, setGuestConnection] = useState(null);
+  const [hostReady, setHostReady] = useState(false);
   const [colorScheme, setColorScheme] = useState('light');
 
   const [folderPath, setFolderPath] = useState(initialCtx.folderPath || '/content/dam');
   const [folderInput, setFolderInput] = useState(initialCtx.folderPath || '/content/dam');
-  const [aemAuthorUrl, setAemAuthorUrl] = useState(initialCtx.aemAuthorUrl || '');
+  const [aemAuthorUrl, setAemAuthorUrl] = useState('');
 
   // Wizard step: 1 = Files & Folder Tree, 2 = Folder Metadata & Rights, 3 = Naming & Commit
   const [step, setStep] = useState(1);
@@ -319,6 +334,8 @@ export default function ModalGuidedUpload () {
         } catch (e) { /* ignore */ }
       } catch (e) {
         // Running standalone outside Assets View host
+      } finally {
+        if (mounted) setHostReady(true);
       }
     })();
     return () => { mounted = false; };
@@ -333,9 +350,6 @@ export default function ModalGuidedUpload () {
       if (data.folderPath && data.folderPath.startsWith('/content/dam')) {
         setFolderPath(data.folderPath);
         setFolderInput(data.folderPath);
-      }
-      if (data.aemAuthorUrl) {
-        setAemAuthorUrl(data.aemAuthorUrl);
       }
 
       if (Array.isArray(data.items) && data.items.length > 0) {
@@ -406,8 +420,9 @@ export default function ModalGuidedUpload () {
     };
   }, []);
 
-  // Resolve Folder Metadata Schema whenever `folderPath` or `guestConnection` settles
+  // Resolve Folder Metadata Schema once `hostReady` is true and `folderPath` / `guestConnection` settle
   useEffect(() => {
+    if (!hostReady) return;
     let cancelled = false;
     const loadSchema = async () => {
       const actionUrl = resolveActionUrl('guided-upload-api');
@@ -418,16 +433,22 @@ export default function ModalGuidedUpload () {
         return;
       }
 
+      const headers = await getHostAuthHeaders(guestConnection);
+      if (cancelled) return;
+      if (!headers.Authorization) {
+        const fallback = createClientFallbackSchema(folderPath);
+        setSchema(fallback);
+        setNamingPattern(fallback.naming.defaultPattern);
+        return;
+      }
+
       setSchemaLoading(true);
       setSchemaError('');
       try {
-        const token = await getHostUserToken(guestConnection);
-        const headers = token ? { Authorization: `Bearer ${token}` } : {};
         const res = await actionWebInvoke(actionUrl, headers, {
           op: 'resolveSchema',
           folderPath,
-          aemAuthorUrl,
-          ...(token ? { userToken: token } : {})
+          ...(aemAuthorUrl ? { aemAuthorUrl } : {})
         });
         if (cancelled) return;
         if (res && res.schema) {
@@ -451,7 +472,7 @@ export default function ModalGuidedUpload () {
 
     loadSchema();
     return () => { cancelled = true; };
-  }, [folderPath, aemAuthorUrl, guestConnection]);
+  }, [hostReady, folderPath, aemAuthorUrl, guestConnection]);
 
   const handleAddFiles = (items = []) => {
     const mapped = items.map((it) => ({
@@ -582,15 +603,16 @@ export default function ModalGuidedUpload () {
     });
 
     try {
-      const token = await getHostUserToken(guestConnection);
-      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const headers = await getHostAuthHeaders(guestConnection);
+      if (!headers.Authorization) {
+        throw new Error('Missing user authentication token from AEM Assets View host. Please reload and sign in.');
+      }
 
       // Step 1: Initiate batch upload (creates subfolders + returns pre-signed uploadURIs)
       const initPayload = {
         op: 'initiate',
         baseFolder: folderPath,
-        aemAuthorUrl,
-        ...(token ? { userToken: token } : {}),
+        ...(aemAuthorUrl ? { aemAuthorUrl } : {}),
         files: namingPlan.items.map((item) => ({
           clientId: item.id,
           fileName: item.governedName,
@@ -637,8 +659,7 @@ export default function ModalGuidedUpload () {
       setUploadPhase('Committing assets & writing folder schema metadata…');
       const completePayload = {
         op: 'complete',
-        aemAuthorUrl,
-        ...(token ? { userToken: token } : {}),
+        ...(aemAuthorUrl ? { aemAuthorUrl } : {}),
         sharedMetadata: metadataValues,
         files: initiatedFiles.map((desc) => {
           const perFileTitle = perAssetTitles[desc.clientId];

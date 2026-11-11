@@ -31,6 +31,25 @@ const {
   completeBatchUpload
 } = require('../actions/upload-broker');
 
+jest.mock('@adobe/aio-sdk', () => ({
+  Core: {
+    Logger: () => ({
+      debug: jest.fn(),
+      info: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn()
+    })
+  }
+}));
+
+const {
+  resolveAemContext
+} = require('../actions/utils');
+
+const {
+  main: guidedUploadMain
+} = require('../actions/guided-upload-api/index');
+
 describe('1. Folder Metadata Schema & Form Resolver', () => {
   const sampleAssetsViewResortsForm = {
     tabs: [
@@ -451,5 +470,62 @@ describe('4. Upload Broker & Metadata Normalization', () => {
     } finally {
       global.fetch = origFetch;
     }
+  });
+});
+
+describe('5. Security Guardrails: Authentication & Server-Pinned AEM Author Allowlist (C1 & C2)', () => {
+  const pinnedAuthor = 'https://author-p59602-e520244.adobeaemcloud.com';
+
+  test('C1: rejects unauthenticated calls and refuses AEM_SC_JSON, AEM_DEV_TOKEN, or body userToken fallbacks', async () => {
+    await expect(
+      resolveAemContext({
+        AEM_AUTHOR_URL: pinnedAuthor,
+        AEM_SC_JSON: 'eyJpbnRlZ3JhdGlvbiI6e319',
+        AEM_DEV_TOKEN: 'dev-secret-token',
+        userToken: 'body-token-should-be-ignored'
+      })
+    ).rejects.toMatchObject({ status: 401 });
+
+    const res = await guidedUploadMain({
+      op: 'listTags',
+      AEM_AUTHOR_URL: pinnedAuthor,
+      AEM_DEV_TOKEN: 'dev-secret-token',
+      userToken: 'body-token-should-be-ignored'
+    });
+    expect(res.statusCode).toBe(401);
+    expect(res.body.ok).toBe(false);
+  });
+
+  test('C2: rejects requests when server AEM_AUTHOR_URL is not configured or when caller supplies a non-allowlisted AEM author', async () => {
+    // Missing server-side AEM_AUTHOR_URL must fail even if caller passes aemAuthorUrl
+    await expect(
+      resolveAemContext({
+        __ow_headers: { authorization: 'Bearer valid-user-token' },
+        aemAuthorUrl: 'https://author-p99999-e999999.adobeaemcloud.com'
+      })
+    ).rejects.toMatchObject({ status: 500 });
+
+    // Caller attempting to redirect token to a foreign author-p*-e*.adobeaemcloud.com must be rejected with 403
+    const attackRes = await guidedUploadMain({
+      op: 'listTags',
+      AEM_AUTHOR_URL: pinnedAuthor,
+      __ow_headers: { authorization: 'Bearer valid-user-token' },
+      aemAuthorUrl: 'https://author-p99999-e999999.adobeaemcloud.com'
+    });
+    expect(attackRes.statusCode).toBe(403);
+    expect(attackRes.body.ok).toBe(false);
+    expect(attackRes.body.error).toMatch(/allowlist/i);
+  });
+
+  test('C1 & C2: succeeds with valid Authorization Bearer header and uses pinned AEM_AUTHOR_URL', async () => {
+    const ctx = await resolveAemContext({
+      AEM_AUTHOR_URL: pinnedAuthor,
+      __ow_headers: { authorization: 'Bearer valid-user-token' }
+    });
+    expect(ctx).toEqual({
+      author: pinnedAuthor,
+      token: 'valid-user-token',
+      authSource: 'user'
+    });
   });
 });

@@ -16,15 +16,11 @@ runtimeManifest:
           web: 'yes'
           runtime: nodejs:22
           inputs:
-            LOG_LEVEL: debug
+            LOG_LEVEL: info
             AEM_AUTHOR_URL: $AEM_AUTHOR_URL
-            AEM_SC_JSON: $AEM_SC_JSON
-            AEM_DEV_TOKEN: $AEM_DEV_TOKEN
           limits:
             timeout: 120000
             memorySize: 256
           annotations:
-            # Caller authentication and DAM folder access are validated in-action using the
-            # signed-in user's bearer token.
-            require-adobe-auth: false
+            require-adobe-auth: true
             final: true

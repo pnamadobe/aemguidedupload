@@ -2,8 +2,6 @@
  * Common authentication, validation, and AEM URL utilities for Guided Upload Runtime actions.
  */
 
-const crypto = require('crypto')
-
 function stringParameters (params = {}) {
   const secretKey = /secret|token|password|credential|private|_sc_json|api_?key|authorization/i
   const redact = (o) => Object.fromEntries(
@@ -14,46 +12,13 @@ function stringParameters (params = {}) {
 
 function getBearerToken (params = {}) {
   const auth = params.__ow_headers && (params.__ow_headers.authorization || params.__ow_headers.Authorization)
-  if (typeof auth === 'string' && /^Bearer\s+/i.test(auth)) {
-    return auth.replace(/^Bearer\s+/i, '').trim()
-  }
-  return undefined
+  if (typeof auth !== 'string') return undefined
+  const match = auth.trim().match(/^Bearer\s+([^\s\x00-\x1f]+)$/i) // eslint-disable-line no-control-regex
+  return match ? match[1] : undefined
 }
 
 function userBearer (params = {}) {
-  const t = getBearerToken(params) || (typeof params.userToken === 'string' ? params.userToken.trim() : '')
-  return t || undefined
-}
-
-const b64url = (x) => Buffer.from(x).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-
-async function aemTokenFromServiceCredential (scB64) {
-  const raw = JSON.parse(Buffer.from(scB64, 'base64').toString('utf8'))
-  const sc = raw.integration || raw
-  const now = Math.floor(Date.now() / 1000)
-  const payload = {
-    exp: now + 300,
-    iss: sc.org,
-    sub: sc.id,
-    aud: `https://${sc.imsEndpoint}/c/${sc.technicalAccount.clientId}`
-  }
-  payload[`https://${sc.imsEndpoint}/s/${sc.metascopes}`] = true
-  const si = b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' })) + '.' + b64url(JSON.stringify(payload))
-  const jwt = si + '.' + b64url(crypto.sign('RSA-SHA256', Buffer.from(si), sc.privateKey))
-  const body = new URLSearchParams({
-    client_id: sc.technicalAccount.clientId,
-    client_secret: sc.technicalAccount.clientSecret,
-    jwt_token: jwt
-  })
-  const r = await fetch(`https://${sc.imsEndpoint}/ims/exchange/jwt`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body
-  })
-  if (!r.ok) {
-    throw new Error(`AEM JWT exchange failed (${r.status}): ${(await r.text()).slice(0, 150)}`)
-  }
-  return (await r.json()).access_token
+  return getBearerToken(params)
 }
 
 const AUTHOR_HOST_RE = /^https:\/\/author-[a-z0-9-]+\.adobeaemcloud\.com$/i
@@ -61,34 +26,57 @@ const AUTHOR_HOST_RE = /^https:\/\/author-[a-z0-9-]+\.adobeaemcloud\.com$/i
 function normalizeAuthorUrl (raw) {
   const s = String(raw || '').trim().replace(/\/+$/, '')
   if (!s) return ''
-  const withScheme = /^https?:\/\//i.test(s) ? s : `https://${s}`
+  const withScheme = (/^https?:\/\//i.test(s) ? s : `https://${s}`).toLowerCase()
   if (!AUTHOR_HOST_RE.test(withScheme)) {
-    throw new Error(`Invalid AEM Author URL: ${s}. Expected https://author-p<program>-e<env>.adobeaemcloud.com`)
+    const err = new Error(`Invalid AEM Author URL: ${s}. Expected https://author-p<program>-e<env>.adobeaemcloud.com`)
+    err.status = 400
+    throw err
   }
   return withScheme
 }
 
+function parseAllowedAuthors (params = {}) {
+  const rawList = [params.AEM_AUTHOR_URL, params.AEM_ALLOWED_AUTHORS]
+    .filter((v) => typeof v === 'string' && v.trim())
+    .join(',')
+  if (!rawList) return []
+  const seen = new Set()
+  for (const part of rawList.split(',')) {
+    const trimmed = part.trim()
+    if (!trimmed) continue
+    const normalized = normalizeAuthorUrl(trimmed)
+    if (normalized) seen.add(normalized)
+  }
+  return [...seen]
+}
+
 async function resolveAemContext (params = {}) {
-  const authorCandidate = params.aemAuthorUrl || params.AEM_AUTHOR_URL || ''
-  const author = normalizeAuthorUrl(authorCandidate)
-  if (!author) {
-    throw new Error('Missing aemAuthorUrl (and no fallback AEM_AUTHOR_URL configured).')
+  const callerToken = userBearer(params)
+  if (!callerToken) {
+    const err = new Error('Missing authentication: sign in to AEM Assets View and provide an Authorization Bearer token.')
+    err.status = 401
+    throw err
   }
 
-  const callerToken = userBearer(params)
-  if (callerToken) {
-    return { author, token: callerToken, authSource: 'user' }
+  const allowedAuthors = parseAllowedAuthors(params)
+  if (!allowedAuthors.length) {
+    const err = new Error('Server configuration error: AEM_AUTHOR_URL must be configured on the Runtime action.')
+    err.status = 500
+    throw err
   }
-  if (params.AEM_SC_JSON) {
-    const token = await aemTokenFromServiceCredential(params.AEM_SC_JSON)
-    return { author, token, authSource: 'service-credential' }
+
+  let author = allowedAuthors[0]
+  if (typeof params.aemAuthorUrl === 'string' && params.aemAuthorUrl.trim()) {
+    const requestedAuthor = normalizeAuthorUrl(params.aemAuthorUrl)
+    if (!allowedAuthors.includes(requestedAuthor)) {
+      const err = new Error(`Forbidden AEM Author URL: ${requestedAuthor} is not in the server's configured AEM_AUTHOR_URL allowlist.`)
+      err.status = 403
+      throw err
+    }
+    author = requestedAuthor
   }
-  if (params.AEM_DEV_TOKEN) {
-    return { author, token: String(params.AEM_DEV_TOKEN).trim(), authSource: 'dev-token' }
-  }
-  const err = new Error('Missing authentication: sign in to AEM Assets View or configure AEM_SC_JSON.')
-  err.status = 401
-  throw err
+
+  return { author, token: callerToken, authSource: 'user' }
 }
 
 function isDamFolder (folder) {
@@ -138,8 +126,8 @@ module.exports = {
   stringParameters,
   getBearerToken,
   userBearer,
-  aemTokenFromServiceCredential,
   normalizeAuthorUrl,
+  parseAllowedAuthors,
   resolveAemContext,
   isDamFolder,
   sanitizeRelativeSubfolder,
