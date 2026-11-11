@@ -55,33 +55,41 @@ function resolveActionUrl (actionName = 'guided-upload-api') {
   return hit ? hit[1] : null;
 }
 
+function withHostTimeout (promise, ms = 600) {
+  return Promise.race([
+    Promise.resolve(promise),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('host-timeout')), ms))
+  ]);
+}
+
 async function getHostAuthHeaders (gc) {
   if (!gc) return {};
   let token = '';
   let imsOrg = '';
   try {
-    const info = await gc.host.auth.getIMSInfo();
-    if (info) {
-      if (info.accessToken) token = info.accessToken;
-      else if (info.token) token = info.token;
-      if (info.imsOrg) imsOrg = info.imsOrg;
-      else if (info.org) imsOrg = info.org;
-    }
-  } catch (e) {
-    // ignore
-  }
-  try {
     const shared = gc.sharedContext && gc.sharedContext.get('auth');
     if (shared) {
-      if (!token && (shared.imsToken || shared.accessToken)) {
-        token = shared.imsToken || shared.accessToken;
+      if (shared.imsToken || shared.accessToken || shared.token) {
+        token = shared.imsToken || shared.accessToken || shared.token;
       }
-      if (!imsOrg && (shared.imsOrg || shared.org)) {
+      if (shared.imsOrg || shared.org) {
         imsOrg = shared.imsOrg || shared.org;
       }
     }
   } catch (e) {
     // ignore
+  }
+  if (!token) {
+    try {
+      const info = await withHostTimeout(gc.host.auth.getIMSInfo(), 600);
+      if (info) {
+        if (info.accessToken) token = info.accessToken;
+        else if (info.token) token = info.token;
+        if (!imsOrg && (info.imsOrg || info.org)) imsOrg = info.imsOrg || info.org;
+      }
+    } catch (e) {
+      // ignore
+    }
   }
   const headers = {};
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -358,12 +366,12 @@ export default function ModalGuidedUpload () {
         setGuestConnection(gc);
 
         try {
-          const themeInfo = await gc.host.theme.getThemeInfo();
+          const themeInfo = await withHostTimeout(gc.host.theme.getThemeInfo(), 600);
           if (mounted && themeInfo?.colorScheme) setColorScheme(themeInfo.colorScheme);
         } catch (e) { /* ignore */ }
 
         try {
-          const payload = await gc.host.modal.getPayload();
+          const payload = await withHostTimeout(gc.host.modal.getPayload(), 500);
           if (mounted && payload) {
             if (payload.folderPath) {
               setFolderPath(payload.folderPath);
@@ -376,12 +384,10 @@ export default function ModalGuidedUpload () {
         } catch (e) { /* ignore */ }
 
         try {
-          if (gc.host?.discovery?.getAemHost) {
-            const host = await gc.host.discovery.getAemHost();
-            if (mounted && host) {
-              const normalized = String(host).startsWith('http') ? host : `https://${host}`;
-              setAemAuthorUrl((prev) => prev || normalized.replace(/\/+$/, ''));
-            }
+          const host = await withHostTimeout(gc.host.discovery.getAemHost(), 500);
+          if (mounted && host) {
+            const normalized = String(host).startsWith('http') ? host : `https://${host}`;
+            setAemAuthorUrl((prev) => prev || normalized.replace(/\/+$/, ''));
           }
         } catch (e) { /* ignore */ }
       } catch (e) {

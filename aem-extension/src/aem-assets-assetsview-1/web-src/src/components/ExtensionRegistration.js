@@ -46,7 +46,10 @@ function ExtensionRegistration () {
       let aemAuthorUrl = findAemAuthorUrl(context, resource);
       if (!aemAuthorUrl && activeGuestConnection.host?.discovery?.getAemHost) {
         try {
-          const discovered = await activeGuestConnection.host.discovery.getAemHost();
+          const discovered = await Promise.race([
+            activeGuestConnection.host.discovery.getAemHost(),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 500))
+          ]);
           if (discovered) {
             aemAuthorUrl = String(discovered).startsWith('http') ? discovered : `https://${discovered}`;
           }

@@ -576,7 +576,8 @@ async function fetchJsonSafe (url, token) {
 
 /**
  * Walks up the folder chain from `folderPath` to `/content/dam` to find the nearest
- * assigned `dam:metadataForm` or `metadataSchema`.
+ * assigned Assets View Metadata Form (`dam:metadataForm` under `/content/dam/appdata/metadataforms/...`).
+ * Prioritizes `dam:metadataForm` across the entire ancestor chain before considering legacy `metadataSchema`.
  */
 async function discoverFolderSchemaAssignment (author, token, folderPath) {
   const clean = String(folderPath || '/content/dam').replace(/\/+$/, '') || '/content/dam'
@@ -586,25 +587,40 @@ async function discoverFolderSchemaAssignment (author, token, folderPath) {
     chain.push('/' + segs.slice(0, i).join('/'))
   }
 
+  let legacyFallback = null
+
   for (const currentPath of chain) {
     const enc = encodeDamPath(currentPath)
-    // Primary: Repository API applicationmetadata (fast, clean JSON)
+    // Primary: Repository API applicationmetadata (fast, clean JSON used by AEM Assets View)
     const appMeta = await fetchJsonSafe(`${author}/adobe/repository${enc};resource=applicationmetadata`, token)
     const jcrMeta = appMeta || (await fetchJsonSafe(`${author}${enc}/jcr:content.1.json`, token))
     if (!jcrMeta) continue
 
     const formPath = jcrMeta['dam:metadataForm'] || jcrMeta.metadataForm || ''
-    const schemaPath = jcrMeta.metadataSchema || jcrMeta.folderMetadataSchema || ''
-
-    if (formPath || (schemaPath && schemaPath !== 'System Default')) {
+    if (formPath) {
       return {
         inheritedFrom: currentPath,
         isInherited: currentPath !== clean,
-        metadataFormPath: formPath || null,
-        metadataSchemaPath: (schemaPath && schemaPath !== 'System Default') ? schemaPath : null,
+        metadataFormPath: formPath,
+        metadataSchemaPath: null,
         folderTitle: jcrMeta['dc:title'] || jcrMeta['jcr:title'] || currentPath.split('/').pop()
       }
     }
+
+    const schemaPath = jcrMeta.metadataSchema || jcrMeta.folderMetadataSchema || ''
+    if (!legacyFallback && schemaPath && schemaPath !== 'System Default') {
+      legacyFallback = {
+        inheritedFrom: currentPath,
+        isInherited: currentPath !== clean,
+        metadataFormPath: null,
+        metadataSchemaPath: schemaPath,
+        folderTitle: jcrMeta['dc:title'] || jcrMeta['jcr:title'] || currentPath.split('/').pop()
+      }
+    }
+  }
+
+  if (legacyFallback) {
+    return legacyFallback
   }
 
   return {
