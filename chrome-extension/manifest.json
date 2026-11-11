@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AEM Guided Upload — Drag-and-Drop Guardrail",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Routes AEM Assets View drag-and-drop uploads into the Guided Upload modal to enforce folder metadata and naming rules.",
   "icons": {
     "16": "icons/icon16.png",
@@ -19,11 +19,6 @@
   },
   "permissions": [
     "storage"
-  ],
-  "host_permissions": [
-    "https://experience.adobe.com/*",
-    "https://experience-stage.adobe.com/*",
-    "https://*.adobeaemcloud.com/*"
   ],
   "content_scripts": [
     {
