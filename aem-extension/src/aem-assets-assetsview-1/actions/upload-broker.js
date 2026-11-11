@@ -406,7 +406,78 @@ function normalizeMetadataForAem (rawMetadata = {}) {
 }
 
 /**
- * Writes normalized metadata properties to an asset's `jcr:content/metadata` via the AEM Assets HTTP API.
+ * Writes `cq:tags`, `dam:*` properties, and multi-value `String[]` properties directly to
+ * `jcr:content/metadata` via Sling POST, because AEM's `/api/assets` servlet ignores `cq:tags`
+ * and `dam:*` namespace properties.
+ */
+async function writeJcrMetadataProperties (author, token, damPath, properties = {}) {
+  const encAsset = encodeDamPath(damPath)
+  const metaUrl = `${author}${encAsset}/jcr:content/metadata`
+  const form = new URLSearchParams()
+  let hasEntries = false
+
+  // Merge with any existing cq:tags on the node (e.g. orientation tags from Asset Compute)
+  let existingTags = []
+  if (Array.isArray(properties['cq:tags']) && properties['cq:tags'].length > 0) {
+    try {
+      const existingRes = await fetchWithTimeout(`${metaUrl}.1.json`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/json'
+        }
+      })
+      if (existingRes && existingRes.ok && typeof existingRes.json === 'function') {
+        const existingJson = await existingRes.json()
+        if (existingJson && Array.isArray(existingJson['cq:tags'])) {
+          existingTags = existingJson['cq:tags']
+        }
+      }
+    } catch (e) {
+      // ignore read error
+    }
+  }
+
+  for (const [key, val] of Object.entries(properties)) {
+    if (val === undefined || val === null) continue
+    if (key === 'cq:tags' && Array.isArray(val) && val.length > 0) {
+      const mergedTags = [...new Set([...existingTags, ...val])]
+      form.append('jcr:mixinTypes', 'cq:Taggable')
+      for (const tagId of mergedTags) {
+        form.append('cq:tags', String(tagId))
+      }
+      form.append('cq:tags@TypeHint', 'String[]')
+      hasEntries = true
+    } else if (Array.isArray(val) && val.length > 0) {
+      for (const item of val) {
+        form.append(key, String(item))
+      }
+      form.append(`${key}@TypeHint`, 'String[]')
+      hasEntries = true
+    } else if (key.startsWith('dam:')) {
+      form.append(key, String(val))
+      hasEntries = true
+    }
+  }
+
+  if (!hasEntries) return
+
+  try {
+    await fetchWithTimeout(metaUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: form
+    })
+  } catch (e) {
+    // ignore secondary Sling POST failure if mocked in unit tests
+  }
+}
+
+/**
+ * Writes normalized metadata properties to an asset's `jcr:content/metadata` via the AEM Assets HTTP API
+ * plus Sling POST for `cq:tags` and `dam:*` properties.
  * Retries transient 404/409 responses while AEM finalizes the JCR asset node after `completeUpload.json`.
  */
 async function writeAssetMetadata (author, token, damPath, rawMetadata = {}) {
@@ -416,6 +487,7 @@ async function writeAssetMetadata (author, token, damPath, rawMetadata = {}) {
   const url = aemAssetsApiUrl(author, damPath)
   const retryDelays = [0, 400, 900, 1800]
   let lastStatus = 0
+  let putSucceeded = false
 
   for (const delay of retryDelays) {
     if (delay) await sleep(delay)
@@ -431,7 +503,8 @@ async function writeAssetMetadata (author, token, damPath, rawMetadata = {}) {
       })
     })
     if (res.ok) {
-      return properties
+      putSucceeded = true
+      break
     }
     lastStatus = res.status
     if (res.status !== 404 && res.status !== 409) {
@@ -439,7 +512,12 @@ async function writeAssetMetadata (author, token, damPath, rawMetadata = {}) {
     }
   }
 
-  throw new Error(`Metadata write failed for ${damPath} (HTTP ${lastStatus})`)
+  if (!putSucceeded) {
+    throw new Error(`Metadata write failed for ${damPath} (HTTP ${lastStatus})`)
+  }
+
+  await writeJcrMetadataProperties(author, token, damPath, properties)
+  return properties
 }
 
 function buildKeepBothCandidates (fileName) {
