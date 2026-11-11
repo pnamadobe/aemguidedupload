@@ -129,7 +129,6 @@ describe('1. Folder Metadata Schema & Form Resolver', () => {
 
     const reqProps = fields.filter((f) => f.required).map((f) => f.property);
     expect(reqProps).toEqual([
-      'dc:title',
       'xcm:keywords',
       'dc:license',
       'pur:expirationDate',
@@ -137,9 +136,9 @@ describe('1. Folder Metadata Schema & Form Resolver', () => {
       'xdm:resortsSeason'
     ]);
 
-    // dc:description stays optional
+    // dc:title and dc:description stay optional so AEM AI-Generated Metadata can populate them when left blank
     const optProps = fields.filter((f) => !f.required).map((f) => f.property);
-    expect(optProps).toEqual(['dc:description']);
+    expect(optProps).toEqual(['dc:title', 'dc:description']);
 
     const naming = buildNamingTokensAndPattern(fields, 'resorts');
     expect(naming.tokens.some((t) => t.property === 'xdm:resortsActivity')).toBe(true);

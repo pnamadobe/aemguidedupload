@@ -45,7 +45,8 @@ function PerAssetTitleField ({
       <TextField
         label={`${field.label} (${field.property})`}
         isRequired={field.required}
-        placeholder={field.placeholder || 'Asset title'}
+        placeholder="Leave blank to let AEM AI automatically generate the title"
+        description="When left blank, AEM's built-in AI metadata service automatically generates a descriptive title on upload."
         value={effectiveVal || ''}
         onChange={(v) => {
           onChangeSingleValue(v);
@@ -71,16 +72,28 @@ function PerAssetTitleField ({
     }
   };
 
+  const clearAllToUseAi = () => {
+    if (typeof onBatchSetPerAssetTitles === 'function') {
+      onBatchSetPerAssetTitles({});
+    }
+    onChangeSingleValue('');
+  };
+
   return (
     <View backgroundColor="gray-75" padding="size-150" borderRadius="regular">
       <Flex direction="column" gap="size-125">
         <Flex justifyContent="space-between" alignItems="center" wrap gap="size-100">
-          <Flex alignItems="center" gap="size-75">
-            <Text>
-              <b>{field.label} — Per-Asset Titles ({queuedFiles.length} assets)</b>{' '}
-              {field.required && <span style={{ color: '#c9252d' }}>*</span>}
+          <Flex direction="column" gap="size-25">
+            <Flex alignItems="center" gap="size-75">
+              <Text>
+                <b>{field.label} — Per-Asset Titles ({queuedFiles.length} assets)</b>{' '}
+                {field.required && <span style={{ color: '#c9252d' }}>*</span>}
+              </Text>
+              <span style={{ fontSize: '11px', opacity: 0.65 }}>({field.property})</span>
+            </Flex>
+            <Text UNSAFE_style={{ fontSize: '11.5px', opacity: 0.8 }}>
+              Leave blank to let AEM AI automatically generate a descriptive title for each asset on upload.
             </Text>
-            <span style={{ fontSize: '11px', opacity: 0.65 }}>({field.property})</span>
           </Flex>
           <Flex gap="size-75" alignItems="end" wrap>
             <TextField
@@ -91,7 +104,10 @@ function PerAssetTitleField ({
               width="size-2000"
             />
             <ActionButton onPress={autoFillFromNames}>
-              {prefixInput.trim() ? 'Apply Prefix + Filename to All' : 'Reset from Filenames'}
+              {prefixInput.trim() ? 'Apply Prefix + Filename' : 'Fill from Filenames'}
+            </ActionButton>
+            <ActionButton onPress={clearAllToUseAi}>
+              Use AEM AI Title (Clear)
             </ActionButton>
           </Flex>
         </Flex>
@@ -101,7 +117,7 @@ function PerAssetTitleField ({
             <thead>
               <tr>
                 <th style={{ width: '42%' }}>Queued File</th>
-                <th>Asset Title (<code>dc:title</code>) *</th>
+                <th>Asset Title (<code>dc:title</code>) {field.required ? '*' : '(Optional — blank uses AEM AI)'}</th>
               </tr>
             </thead>
             <tbody>
@@ -117,7 +133,7 @@ function PerAssetTitleField ({
                       <input
                         type="text"
                         value={currentTitle}
-                        placeholder="Enter title for this asset..."
+                        placeholder="Leave blank for AEM AI-generated title..."
                         onChange={(e) => onChangePerAssetTitle(f.id, e.target.value)}
                         style={{
                           width: '100%',

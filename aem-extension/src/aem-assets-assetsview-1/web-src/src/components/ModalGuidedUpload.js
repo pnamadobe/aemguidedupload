@@ -87,18 +87,6 @@ async function getHostAuthHeaders (gc) {
 function createClientFallbackSchema (folderPath = '/content/dam') {
   const requiredFields = [
     {
-      id: 'dc_title',
-      property: 'dc:title',
-      label: 'Title',
-      tab: 'Basic',
-      section: 'Metadata',
-      type: 'text',
-      required: true,
-      requiredSource: 'governance-policy',
-      placeholder: 'Asset title',
-      options: []
-    },
-    {
       id: 'xdm_campaignName',
       property: 'xdm:campaignName',
       label: 'Campaign Name',
@@ -187,6 +175,17 @@ function createClientFallbackSchema (folderPath = '/content/dam') {
   ];
 
   const optionalFields = [
+    {
+      id: 'dc_title',
+      property: 'dc:title',
+      label: 'Title',
+      tab: 'Basic',
+      section: 'Metadata',
+      type: 'text',
+      required: false,
+      placeholder: 'Leave blank for AEM AI-generated title',
+      options: []
+    },
     {
       id: 'dc_description',
       property: 'dc:description',
@@ -416,17 +415,6 @@ export default function ModalGuidedUpload () {
           setQueuedFiles((prev) => {
             const existingKeys = new Set(prev.map((p) => `${p.relativePath}|${p.size}`));
             const fresh = mapped.filter((m) => !existingKeys.has(`${m.relativePath}|${m.size}`));
-            if (fresh.length > 0) {
-              setPerAssetTitles((pt) => {
-                const next = { ...pt };
-                for (const item of fresh) {
-                  if (!next[item.id]) next[item.id] = humanTitleFromFileName(item.name) || item.name;
-                }
-                return next;
-              });
-              const firstTitle = humanTitleFromFileName(fresh[0].name) || fresh[0].name;
-              setMetadataValues((mv) => (mv['dc:title'] ? mv : { ...mv, 'dc:title': firstTitle }));
-            }
             return [...prev, ...fresh];
           });
           setHandoffSource('chrome-extension');
@@ -528,19 +516,6 @@ export default function ModalGuidedUpload () {
     setQueuedFiles((prev) => {
       const existingKeys = new Set(prev.map((p) => `${p.relativePath}|${p.size}`));
       const fresh = mapped.filter((m) => !existingKeys.has(`${m.relativePath}|${m.size}`));
-      if (fresh.length > 0) {
-        setPerAssetTitles((pt) => {
-          const next = { ...pt };
-          for (const item of fresh) {
-            if (!next[item.id]) next[item.id] = humanTitleFromFileName(item.name) || item.name;
-          }
-          return next;
-        });
-        if (prev.length === 0) {
-          const firstTitle = humanTitleFromFileName(fresh[0].name) || fresh[0].name;
-          setMetadataValues((mv) => (mv['dc:title'] ? mv : { ...mv, 'dc:title': firstTitle }));
-        }
-      }
       return [...prev, ...fresh];
     });
   };
@@ -735,14 +710,21 @@ export default function ModalGuidedUpload () {
       }
 
       // Step 3: Complete upload & write governed schema metadata to jcr:content/metadata
+      // Note: If dc:title was left blank, omit it so AEM's built-in AI-Generated Metadata
+      // machinery automatically assigns an AI-generated title during post-upload processing.
       setUploadPhase('Committing assets & writing folder schema metadata…');
+      const cleanedSharedMeta = { ...metadataValues };
+      if (typeof cleanedSharedMeta['dc:title'] === 'string' && !cleanedSharedMeta['dc:title'].trim()) {
+        delete cleanedSharedMeta['dc:title'];
+      }
       const completePayload = {
         op: 'complete',
         baseFolder: folderPath,
         ...(aemAuthorUrl ? { aemAuthorUrl } : {}),
-        sharedMetadata: metadataValues,
+        sharedMetadata: cleanedSharedMeta,
         files: initiatedFiles.map((desc) => {
-          const perFileTitle = perAssetTitles[desc.clientId];
+          const rawTitle = perAssetTitles[desc.clientId];
+          const cleanTitle = typeof rawTitle === 'string' ? rawTitle.trim() : '';
           return {
             clientId: desc.clientId,
             fileName: desc.fileName,
@@ -752,7 +734,7 @@ export default function ModalGuidedUpload () {
             uploadToken: desc.uploadToken,
             replace: Boolean(desc.replace),
             createVersion: Boolean(desc.createVersion),
-            metadata: perFileTitle ? { 'dc:title': perFileTitle } : {}
+            metadata: cleanTitle ? { 'dc:title': cleanTitle } : {}
           };
         })
       };

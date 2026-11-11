@@ -53,8 +53,10 @@ const SYSTEM_PROP_PREFIXES = [
 ]
 
 // Priority governance fields promoted when a schema has 0 explicit `required: true` flags in JCR
+// Note: `dc:title` is intentionally excluded so it remains optional by default — when `dc:title`
+// is left blank on upload, AEM's built-in AI-Generated Metadata service automatically generates
+// and assigns an AI title during asset processing.
 const CORE_GOVERNANCE_PROPS = new Set([
-  'dc:title',
   'xdm:campaignName',
   'pn:campaignTitle',
   'dam:pnCampaignName',
@@ -440,9 +442,9 @@ function getDefaultFallbackFields () {
       tab: 'Basic',
       section: 'Metadata',
       type: 'text',
-      required: true,
-      requiredSource: 'governance-policy',
-      placeholder: 'Asset title',
+      required: false,
+      requiredSource: null,
+      placeholder: 'Leave blank for AEM AI-generated title',
       options: []
     },
     {
