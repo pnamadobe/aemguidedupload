@@ -75,13 +75,39 @@ npm test
 
 ---
 
-## Security & Authentication Architecture
+## Security, Performance & Governance Architecture
 
+### 1. Security Hardening
 - **Mandatory IMS User Authentication (C1)**:
   - The Adobe I/O Runtime action (`guided-upload-api`) enforces `require-adobe-auth: true` at the gateway and validates the caller's `Authorization: Bearer <token>` HTTP header inside `resolveAemContext()`.
   - Static service-account (`AEM_SC_JSON`), developer-token (`AEM_DEV_TOKEN`), and request-body token (`userToken`) fallbacks are excluded so every DAM read/write executes strictly under the signed-in user's AEM permissions.
-  - The modal waits for the UIX guest connection (`attach()`) to settle before invoking `guided-upload-api` and passes `Authorization` (and `x-gw-ims-org-id` when provided by the host) exclusively via HTTP headers.
+  - The modal reads `gc.sharedContext.get('auth')` immediately upon UIX connection (`attach()`) and passes `Authorization` (and `x-gw-ims-org-id`) exclusively via HTTP headers.
 - **Server-Pinned AEM Author Allowlist (C2)**:
   - `AEM_AUTHOR_URL` is bound as a finalized (`final: true`) Runtime action input in `ext.config.yaml` (supports a single AEM Author origin or a comma-separated allowlist via `AEM_AUTHOR_URL` / `AEM_ALLOWED_AUTHORS`).
   - All backend operations default to the server-pinned `AEM_AUTHOR_URL` and reject any request supplying a non-allowlisted `aemAuthorUrl` with `403 Forbidden`, preventing Bearer token redirection/SSRF to foreign `author-p*-e*.adobeaemcloud.com` instances.
   - The web UI never reads or trusts `aemAuthorUrl` from URL query parameters, `localStorage`, or `window.postMessage` payloads.
+- **Cross-Frame `postMessage` Origin Allowlist & Targeted File Delivery (H1 & H2)**:
+  - Every `window.addEventListener('message')` handler in the web app and companion Chrome extension validates `event.origin` against an explicit Adobe origin allowlist (`https://experience.adobe.com`, `https://experience-stage.adobe.com`, `https://*.adobeaemcloud.com`, `https://*.adobeio-static.net`, and `localhost`).
+  - Dropped `File` objects are never broadcast with `postMessage(..., '*')`; `DROPPED_FILES` is delivered exclusively to the verified `event.source` and `event.origin` that signaled `MODAL_READY`.
+- **Backend Governance, Protected JCR Properties & Filename Validation (H3, H4, H5)**:
+  - `validateFileName()` enforces `/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,180}\.[a-zA-Z0-9]{1,10}$/` on both client and server, blocking path traversal and JCR-illegal characters (`* : [ ] | % # ?`).
+  - `normalizeMetadataForAem()` strips protected/system JCR namespaces (`jcr:*`, `sling:*`, `rep:*`, `oak:*`, `granite:*`, `dam:sha1`, `dam:size`) and verifies `targetFolder` is inside `baseFolder`.
+  - Pre-upload duplicate detection (`initiateBatchUpload`) checks whether any governed filename already exists in the target AEM folder and prompts the user to **Keep Both** (auto-renaming `-1`, `-2`), **Replace**, **Create Version**, or **Skip**.
+
+### 2. AEM Assets View Integration & UX
+- **Assets View Metadata Forms (`dam:metadataForm`)**:
+  - Walks the ancestor folder hierarchy from the target DAM folder to `/content/dam` prioritizing `dam:metadataForm` (`/content/dam/appdata/metadataforms/<form>`).
+  - Enforces existing AEM taxonomy tags (`candidatePool`) in the Tag Picker without allowing ad-hoc free-text tag creation, and writes `cq:tags` with `jcr:mixinTypes=cq:Taggable` and `cq:tags@TypeHint=String[]` so tags immediately resolve under `xcm:keywords` in AEM Assets View.
+- **Native AEM AI-Generated Titles (`dc:title`)**:
+  - Leaves `dc:title` optional and blank by default so AEM's built-in AI-Generated Metadata service automatically generates and assigns a descriptive title (`autogen:title`) during asset processing, while still supporting optional manual overrides.
+- **Adobe Spectrum Design & Automatic Folder Refresh**:
+  - Built with `@adobe/react-spectrum` and `@spectrum-icons/workflow` to match AEM Assets View in both Light and Dark themes.
+  - Automatically closes the modal on upload completion and refreshes the AEM Assets View folder contents after a 550ms indexing delay.
+
+### 3. Performance & Robustness
+- **Multi-Part Upload Chunk Sizing & Cancellation (M1, M2)**:
+  - `computeUploadPartPlan()` honors `minPartSize` and `maxPartSize` from `initiateUpload.json`, and `AbortController` cancels in-flight binary `PUT` requests if the modal is closed.
+- **Timeouts, Caching & Bounded Concurrency (M3, M4, P1–P4)**:
+  - All backend AEM requests use a 15-second `AbortSignal.timeout(15000)`.
+  - Warm Runtime containers cache resolved folder schemas (2-minute TTL) and `/content/cq:tags.3.json` taxonomy trees (5-minute TTL).
+  - Multi-file `initiate` and `complete` operations execute with bounded concurrency (`mapWithConcurrency`, up to 4 in parallel).
