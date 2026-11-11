@@ -10,7 +10,13 @@
   };
 
   function pushSettings (settings) {
-    window.postMessage({ __GU_SETTINGS__: settings }, window.location.origin);
+    try {
+      const origin = window.location && window.location.origin;
+      const targetOrigin = (typeof origin === 'string' && /^https?:\/\//i.test(origin)) ? origin : '*';
+      window.postMessage({ __GU_SETTINGS__: settings }, targetOrigin);
+    } catch (e) {
+      // ignore postMessage errors on about:blank or sandboxed frames
+    }
   }
 
   try {

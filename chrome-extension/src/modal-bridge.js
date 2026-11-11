@@ -184,37 +184,22 @@
   }
 
   /**
-   * Syncs `STAGE_BATCH` only to trusted Adobe host origins (never `'*'`).
+   * Syncs `STAGE_BATCH` to `window.top` / `window.parent` using their exact `location.ancestorOrigins`
+   * origin so Chrome never logs a targetOrigin mismatch error.
    */
-  function broadcastToTrustedHostFrames (msg) {
-    const allowedTargetOrigins = [...new Set([
-      location.origin,
-      'https://experience.adobe.com',
-      'https://experience-stage.adobe.com'
-    ])].filter((o) => isTrustedHostOrigin(o));
-
-    let rootWin = window;
+  function syncBatchToHostAncestors (msg) {
     try {
-      if (window.top) rootWin = window.top;
-    } catch (e) { /* ignore */ }
-
-    const visited = new Set();
-    function walkFrames (win) {
-      if (!win || visited.has(win)) return;
-      visited.add(win);
-      for (const targetOrigin of allowedTargetOrigins) {
-        try {
-          win.postMessage(msg, targetOrigin);
-        } catch (e) { /* ignore */ }
+      const ancestors = location.ancestorOrigins;
+      if (!ancestors || !ancestors.length) return;
+      const parentOrigin = ancestors[0];
+      if (window.parent && window.parent !== window && isTrustedHostOrigin(parentOrigin)) {
+        window.parent.postMessage(msg, parentOrigin);
       }
-      try {
-        for (let i = 0; i < win.frames.length; i++) {
-          walkFrames(win.frames[i]);
-        }
-      } catch (e) { /* ignore */ }
-    }
-
-    walkFrames(rootWin);
+      const topOrigin = ancestors[ancestors.length - 1];
+      if (window.top && window.top !== window && window.top !== window.parent && isTrustedHostOrigin(topOrigin)) {
+        window.top.postMessage(msg, topOrigin);
+      }
+    } catch (e) { /* ignore */ }
   }
 
   function deliverPendingBatchToFrame (targetWindow, targetOrigin) {
@@ -547,8 +532,8 @@
       items
     };
 
-    // 0. Sync pendingBatch ONLY to trusted Adobe host frames (never '*' to third-party frames)
-    broadcastToTrustedHostFrames({
+    // 0. Sync pendingBatch to parent/top host frame using exact ancestorOrigins
+    syncBatchToHostAncestors({
       [HANDOFF_NS]: 'STAGE_BATCH',
       folderPath,
       aemAuthorUrl,

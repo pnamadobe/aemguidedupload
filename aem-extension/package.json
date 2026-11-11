@@ -1,6 +1,6 @@
 {
   "name": "aem-guided-upload",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "private": true,
   "description": "AEM Assets View UI Extension that overrides 'Add assets' with a Guided Upload wizard enforcing folder metadata schemas, usage rights, folder structure, and naming conventions.",
   "dependencies": {

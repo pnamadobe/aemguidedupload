@@ -20,7 +20,7 @@
   };
 
   window.addEventListener('message', (e) => {
-    if (e.source !== window || e.origin !== window.location.origin) return;
+    if (!e || e.source !== window) return;
     if (e.data && e.data.__GU_SETTINGS__) {
       settings = { ...settings, ...e.data.__GU_SETTINGS__ };
     }
