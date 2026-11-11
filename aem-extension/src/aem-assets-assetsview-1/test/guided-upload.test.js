@@ -26,6 +26,7 @@ const {
 } = require('../web-src/src/components/NamingEngine');
 
 const {
+  validateFileName,
   normalizeMetadataForAem,
   initiateBatchUpload,
   completeBatchUpload,
@@ -594,5 +595,62 @@ describe('5. Security Guardrails: Authentication & Server-Pinned AEM Author Allo
       token: 'valid-user-token',
       authSource: 'user'
     });
+  });
+
+  test('H5: enforces strict governed filename regex on backend and blocks JCR-illegal characters', () => {
+    expect(validateFileName('vail_winter-2026_001.jpg')).toBe('vail_winter-2026_001.jpg');
+    expect(() => validateFileName('bad*file:name?.jpg')).toThrow(/Invalid governed file name/);
+    expect(() => validateFileName('../escape.jpg')).toThrow(/Invalid governed file name/);
+    expect(() => validateFileName('no-extension')).toThrow(/Invalid governed file name/);
+  });
+
+  test('H3: strips protected JCR/system properties, enforces baseFolder scope, and requires governed metadata on complete', async () => {
+    const sanitized = normalizeMetadataForAem({
+      'dc:title': 'Legit Title',
+      'jcr:primaryType': 'nt:unstructured',
+      'sling:resourceType': 'evil/type',
+      'rep:principalName': 'admin',
+      'dam:sha1': 'fake-sha1',
+      'ext:links': ['https://example.com/a', 'https://example.com/b']
+    });
+    expect(sanitized['dc:title']).toBe('Legit Title');
+    expect(sanitized['jcr:primaryType']).toBeUndefined();
+    expect(sanitized['sling:resourceType']).toBeUndefined();
+    expect(sanitized['rep:principalName']).toBeUndefined();
+    expect(sanitized['dam:sha1']).toBeUndefined();
+    // https:// URLs must not be auto-merged into cq:tags
+    expect(sanitized['cq:tags']).toBeUndefined();
+
+    // Rejects targetFolder outside baseFolder
+    await expect(
+      completeBatchUpload(
+        pinnedAuthor,
+        'valid-user-token',
+        [{
+          clientId: 'c1',
+          fileName: 'vail_winter_001.jpg',
+          targetFolder: '/content/dam/other-tenant/folder',
+          uploadToken: 'tok-123'
+        }],
+        { 'dc:title': 'Title' },
+        { baseFolder: '/content/dam/26H2/vail' }
+      )
+    ).rejects.toMatchObject({ status: 400 });
+
+    // Rejects completion with empty / all-protected metadata
+    await expect(
+      completeBatchUpload(
+        pinnedAuthor,
+        'valid-user-token',
+        [{
+          clientId: 'c1',
+          fileName: 'vail_winter_001.jpg',
+          targetFolder: '/content/dam/26H2/vail/assets',
+          uploadToken: 'tok-123'
+        }],
+        { 'jcr:primaryType': 'nt:unstructured' },
+        { baseFolder: '/content/dam/26H2/vail' }
+      )
+    ).rejects.toMatchObject({ status: 400 });
   });
 });

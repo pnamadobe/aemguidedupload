@@ -98,7 +98,8 @@ async function main (params = {}) {
           author,
           token,
           params.files || [],
-          params.sharedMetadata || {}
+          params.sharedMetadata || {},
+          { baseFolder: params.baseFolder || params.folderPath || params.folder || '' }
         )
         return {
           statusCode: 200,

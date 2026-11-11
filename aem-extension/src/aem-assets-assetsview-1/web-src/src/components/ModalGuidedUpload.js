@@ -738,6 +738,7 @@ export default function ModalGuidedUpload () {
       setUploadPhase('Committing assets & writing folder schema metadata…');
       const completePayload = {
         op: 'complete',
+        baseFolder: folderPath,
         ...(aemAuthorUrl ? { aemAuthorUrl } : {}),
         sharedMetadata: metadataValues,
         files: initiatedFiles.map((desc) => {

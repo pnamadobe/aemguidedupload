@@ -13,12 +13,63 @@ const { isDamFolder, sanitizeRelativeSubfolder, encodeDamPath } = require('./uti
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
-const SAFE_FILENAME_RE = /^[^/\\\x00-\x1f]+$/ // eslint-disable-line no-control-regex
+const GOVERNED_FILENAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,180}\.[a-zA-Z0-9]{1,10}$/
+
+const PROTECTED_METADATA_PROPS = new Set([
+  '__proto__',
+  'constructor',
+  'prototype',
+  'dc:format',
+  'repo:createDate',
+  'repo:modifyDate',
+  'dam:publishInfo',
+  'xcm:machineKeywords',
+  'dam:sha1',
+  'dam:size',
+  'dam:extracted',
+  'dam:relativePath',
+  'dam:parentAssetPath',
+  'dam:guidedUploadCommitted',
+  'jcr:primaryType',
+  'jcr:mixinTypes',
+  'jcr:uuid',
+  'jcr:created',
+  'jcr:createdBy',
+  'jcr:lastModified',
+  'jcr:lastModifiedBy'
+])
+
+const PROTECTED_METADATA_PREFIXES = [
+  'jcr:',
+  'sling:',
+  'rep:',
+  'oak:',
+  'granite:',
+  'cq:lastReplicated',
+  'cq:lastReplication'
+]
+
+function isAllowedMetadataKey (key) {
+  if (!key || typeof key !== 'string') return false
+  if (!/^[a-zA-Z][a-zA-Z0-9_:-]{0,120}$/.test(key)) return false
+  if (PROTECTED_METADATA_PROPS.has(key)) return false
+  if (key === 'cq:tags') return true
+  return !PROTECTED_METADATA_PREFIXES.some((prefix) => key.toLowerCase().startsWith(prefix.toLowerCase()))
+}
+
+function isTargetWithinBaseFolder (targetFolder, baseFolder) {
+  const cleanTarget = String(targetFolder || '').replace(/\/+$/, '')
+  const cleanBase = String(baseFolder || '').replace(/\/+$/, '')
+  if (!cleanBase) return true
+  return cleanTarget === cleanBase || cleanTarget.startsWith(`${cleanBase}/`)
+}
 
 function validateFileName (name) {
   const s = String(name || '').trim()
-  if (!s || s === '.' || s === '..' || !SAFE_FILENAME_RE.test(s) || s.length > 220) {
-    throw new Error(`Invalid governed file name: "${s}"`)
+  if (!s || s.includes('..') || !GOVERNED_FILENAME_RE.test(s)) {
+    const err = new Error(`Invalid governed file name: "${s}". Must use alphanumeric characters, hyphens, or underscores and include a valid extension.`)
+    err.status = 400
+    throw err
   }
   return s
 }
@@ -278,7 +329,7 @@ function normalizeMetadataForAem (rawMetadata = {}) {
     if (Array.isArray(rawVal) && rawVal.length === 0) continue
 
     const key = String(rawKey).trim()
-    if (!key) continue
+    if (!isAllowedMetadataKey(key)) continue
 
     if (key === 'xcm:keywords' || key === 'cq:tags') {
       const tags = Array.isArray(rawVal)
@@ -293,7 +344,10 @@ function normalizeMetadataForAem (rawMetadata = {}) {
     // If a custom tag_picker field (e.g. product:sportCategory, xdm:playerName, gartner:tags)
     // holds an array of taxonomy tag IDs (`namespace:tag`), write the custom property AND
     // also merge valid taxonomy tag IDs into `cq:tags` so AEM's tag index picks them up.
-    if (Array.isArray(rawVal) && rawVal.every((v) => typeof v === 'string' && /^[a-z0-9_-]+:/i.test(v))) {
+    if (
+      Array.isArray(rawVal) &&
+      rawVal.every((v) => typeof v === 'string' && !/^https?:/i.test(v.trim()) && /^[a-z0-9_-]+:[a-z0-9_/-]+$/i.test(v.trim()))
+    ) {
       const cleanTags = rawVal.map((v) => v.trim()).filter(Boolean)
       out[key] = cleanTags
       out['cq:tags'] = [...new Set([...(out['cq:tags'] || []), ...cleanTags])]
@@ -495,9 +549,18 @@ async function applyBatchMetadata (author, token, files = [], sharedMetadata = {
 /**
  * Completes direct binary upload and applies governed metadata for each uploaded file.
  */
-async function completeBatchUpload (author, token, files = [], sharedMetadata = {}) {
+async function completeBatchUpload (author, token, files = [], sharedMetadata = {}, options = {}) {
   if (!Array.isArray(files) || !files.length) {
-    throw new Error('files array is required to complete upload')
+    const err = new Error('files array is required to complete upload')
+    err.status = 400
+    throw err
+  }
+
+  const cleanBase = options.baseFolder ? String(options.baseFolder).replace(/\/+$/, '') : ''
+  if (cleanBase && !isDamFolder(cleanBase)) {
+    const err = new Error(`Invalid baseFolder: ${options.baseFolder}`)
+    err.status = 400
+    throw err
   }
 
   const results = []
@@ -505,10 +568,31 @@ async function completeBatchUpload (author, token, files = [], sharedMetadata = 
     const fileName = validateFileName(f.fileName)
     const targetFolder = String(f.targetFolder || '').replace(/\/+$/, '')
     if (!isDamFolder(targetFolder)) {
-      throw new Error(`Invalid targetFolder for "${fileName}": ${targetFolder}`)
+      const err = new Error(`Invalid targetFolder for "${fileName}": ${targetFolder}`)
+      err.status = 400
+      throw err
+    }
+    if (cleanBase && !isTargetWithinBaseFolder(targetFolder, cleanBase)) {
+      const err = new Error(`Target folder "${targetFolder}" for "${fileName}" is outside baseFolder "${cleanBase}"`)
+      err.status = 400
+      throw err
     }
     if (!f.uploadToken) {
-      throw new Error(`Missing uploadToken for "${fileName}"`)
+      const err = new Error(`Missing uploadToken for "${fileName}"`)
+      err.status = 400
+      throw err
+    }
+
+    const mergedMeta = {
+      ...(sharedMetadata || {}),
+      ...(f.metadata || {})
+    }
+    const normalizedCheck = normalizeMetadataForAem(mergedMeta)
+    const userPropKeys = Object.keys(normalizedCheck).filter((k) => k !== 'dam:guidedUploadCommitted')
+    if (userPropKeys.length === 0) {
+      const err = new Error(`Missing governed metadata for "${fileName}": at least one valid schema metadata property is required`)
+      err.status = 400
+      throw err
     }
 
     const encodedFolder = encodeDamPath(targetFolder)
@@ -535,11 +619,6 @@ async function completeBatchUpload (author, token, files = [], sharedMetadata = 
     }
 
     const damPath = `${targetFolder}/${fileName}`
-    const mergedMeta = {
-      ...(sharedMetadata || {}),
-      ...(f.metadata || {})
-    }
-    // If dc:title wasn't individually overridden for multi-file uploads, default per-file title or append stem
     const writtenProps = await writeAssetMetadata(author, token, damPath, mergedMeta)
 
     results.push({
