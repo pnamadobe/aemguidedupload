@@ -35,6 +35,13 @@ const EXPIRATION_PROPERTIES = new Set([
   'offTime'
 ]);
 
+function getLocalTodayIso (now = new Date()) {
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 /**
  * Validates current form values against the folder's resolved schema fields and any registered custom rules.
  *
@@ -57,7 +64,7 @@ function validateMetadataValues (values = {}, schemaFields = [], options = {}) {
     }
   };
 
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = getLocalTodayIso(options.now instanceof Date ? options.now : new Date());
 
   for (const field of schemaFields) {
     const val = values[field.property];
@@ -142,6 +149,7 @@ function validateMetadataValues (values = {}, schemaFields = [], options = {}) {
 
 module.exports = {
   isValueEmpty,
+  getLocalTodayIso,
   registerValidationRule,
   validateMetadataValues
 };

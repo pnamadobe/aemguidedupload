@@ -109,6 +109,34 @@ function encodeDamPath (damPath) {
     .join('/')
 }
 
+function fetchWithTimeout (url, options = {}, timeoutMs = 15000) {
+  const signal =
+    options.signal ||
+    (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+      ? AbortSignal.timeout(timeoutMs)
+      : undefined)
+  return fetch(url, signal ? { ...options, signal } : options)
+}
+
+async function mapWithConcurrency (items = [], concurrency = 4, fn) {
+  const list = Array.isArray(items) ? items : []
+  if (!list.length) return []
+  const limit = Math.max(1, Number(concurrency) || 4)
+  const results = new Array(list.length)
+  let nextIdx = 0
+
+  async function worker () {
+    while (nextIdx < list.length) {
+      const idx = nextIdx++
+      results[idx] = await fn(list[idx], idx)
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(limit, list.length) }, () => worker())
+  await Promise.all(workers)
+  return results
+}
+
 function errorResponse (statusCode, message, logger) {
   if (logger && typeof logger.info === 'function') {
     logger.info(`${statusCode}: ${message}`)
@@ -132,5 +160,7 @@ module.exports = {
   isDamFolder,
   sanitizeRelativeSubfolder,
   encodeDamPath,
+  fetchWithTimeout,
+  mapWithConcurrency,
   errorResponse
 }

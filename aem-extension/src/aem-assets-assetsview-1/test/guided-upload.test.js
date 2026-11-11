@@ -16,6 +16,7 @@ const {
 
 const {
   validateMetadataValues,
+  getLocalTodayIso,
   registerValidationRule
 } = require('../web-src/src/components/ValidationRules');
 
@@ -31,11 +32,16 @@ const {
 
 const {
   validateFileName,
+  ensureFolder,
   normalizeMetadataForAem,
   initiateBatchUpload,
   completeBatchUpload,
   applyBatchMetadata
 } = require('../actions/upload-broker');
+
+const {
+  mapWithConcurrency
+} = require('../actions/utils');
 
 jest.mock('@adobe/aio-sdk', () => ({
   Core: {
@@ -668,5 +674,24 @@ describe('5. Security Guardrails: Authentication & Server-Pinned AEM Author Allo
     expect(isTrustedMessageOrigin('https://experience.adobe.com.evil.com')).toBe(false);
     expect(isTrustedMessageOrigin('null')).toBe(false);
     expect(isTrustedMessageOrigin('')).toBe(false);
+  });
+
+  test('M4, M5 & P3: ensureFolder surfaces 403 errors, getLocalTodayIso uses local calendar date, and mapWithConcurrency preserves order', async () => {
+    const origFetch = global.fetch;
+    global.fetch = async () => ({ ok: false, status: 403 });
+    try {
+      await expect(
+        ensureFolder(pinnedAuthor, 'tok', '/content/dam/restricted-folder')
+      ).rejects.toMatchObject({ status: 403 });
+    } finally {
+      global.fetch = origFetch;
+    }
+
+    const localSample = new Date(2026, 10, 11, 23, 30, 0); // Nov 11 2026 11:30 PM local
+    expect(getLocalTodayIso(localSample)).toBe('2026-11-11');
+
+    const items = [10, 20, 30, 40, 50];
+    const mapped = await mapWithConcurrency(items, 2, async (x, idx) => `${idx}:${x * 2}`);
+    expect(mapped).toEqual(['0:20', '1:40', '2:60', '3:80', '4:100']);
   });
 });

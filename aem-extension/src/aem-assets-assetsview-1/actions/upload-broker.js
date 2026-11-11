@@ -9,7 +9,13 @@
  *   5. `PUT /api/assets/<relAssetPath>` -> writes validated schema metadata & usage rights to `jcr:content/metadata`
  */
 
-const { isDamFolder, sanitizeRelativeSubfolder, encodeDamPath } = require('./utils')
+const {
+  isDamFolder,
+  sanitizeRelativeSubfolder,
+  encodeDamPath,
+  fetchWithTimeout,
+  mapWithConcurrency
+} = require('./utils')
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -88,8 +94,13 @@ async function ensureFolder (author, token, damPath, folderTitles = {}) {
   if (!isDamFolder(clean) || clean === '/content/dam') return
 
   const headers = { Authorization: `Bearer ${token}` }
-  const checkRes = await fetch(`${aemAssetsApiUrl(author, clean)}.json`, { headers })
+  const checkRes = await fetchWithTimeout(`${aemAssetsApiUrl(author, clean)}.json`, { headers })
   if (checkRes.ok) return
+  if (checkRes.status && checkRes.status !== 404) {
+    const err = new Error(`Failed to verify folder ${clean} (HTTP ${checkRes.status})`)
+    err.status = checkRes.status
+    throw err
+  }
 
   const cut = clean.lastIndexOf('/')
   const parent = clean.slice(0, cut)
@@ -99,7 +110,7 @@ async function ensureFolder (author, token, damPath, folderTitles = {}) {
 
   const nodeName = clean.slice(cut + 1)
   const title = folderTitles[clean] || nodeName
-  const createRes = await fetch(aemAssetsApiUrl(author, clean), {
+  const createRes = await fetchWithTimeout(aemAssetsApiUrl(author, clean), {
     method: 'POST',
     headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -108,7 +119,9 @@ async function ensureFolder (author, token, damPath, folderTitles = {}) {
     })
   })
   if (!createRes.ok && createRes.status !== 409) {
-    throw new Error(`Failed to create folder ${clean} (HTTP ${createRes.status})`)
+    const err = new Error(`Failed to create folder ${clean} (HTTP ${createRes.status})`)
+    err.status = createRes.status || 500
+    throw err
   }
 }
 
@@ -141,7 +154,7 @@ async function ensureFolderHierarchy (author, token, baseFolder, relativeSubfold
  */
 async function initiateSingleFileUpload (author, token, targetFolder, fileName, fileSize, mimeType) {
   const encodedFolder = encodeDamPath(targetFolder)
-  const doInitiate = () => fetch(`${author}${encodedFolder}.initiateUpload.json`, {
+  const doInitiate = () => fetchWithTimeout(`${author}${encodedFolder}.initiateUpload.json`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -189,7 +202,7 @@ async function initiateSingleFileUpload (author, token, targetFolder, fileName, 
 
 async function assetExistsInAem (author, token, damPath) {
   try {
-    const res = await fetch(`${aemAssetsApiUrl(author, damPath)}.json`, {
+    const res = await fetchWithTimeout(`${aemAssetsApiUrl(author, damPath)}.json`, {
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: 'application/json'
@@ -283,25 +296,27 @@ async function initiateBatchUpload (author, token, baseFolder, files = [], folde
   }
 
   const usedInBatch = new Set(resolvedTargets.map((t) => t.damPath))
-  const initiated = []
+  const toInitiate = resolvedTargets.filter((item) => !(item.existsInAem && duplicateResolution === 'skip'))
 
-  for (const item of resolvedTargets) {
-    if (item.existsInAem && duplicateResolution === 'skip') {
-      continue
-    }
-    let finalFileName = item.fileName
+  // Resolve any Keep Both names sequentially so batch set stays conflict-free, then initiate with bounded concurrency
+  for (const item of toInitiate) {
     if (item.existsInAem && duplicateResolution === 'keep-both') {
-      finalFileName = await resolveUniqueFileNameInAem(author, token, item.targetFolder, item.fileName, usedInBatch)
+      item.finalFileName = await resolveUniqueFileNameInAem(author, token, item.targetFolder, item.fileName, usedInBatch)
+    } else {
+      item.finalFileName = item.fileName
     }
-    const info = await initiateSingleFileUpload(author, token, item.targetFolder, finalFileName, item.size, item.mimeType)
-    initiated.push({
+  }
+
+  const initiated = await mapWithConcurrency(toInitiate, 4, async (item) => {
+    const info = await initiateSingleFileUpload(author, token, item.targetFolder, item.finalFileName, item.size, item.mimeType)
+    return {
       clientId: item.clientId,
       subfolder: item.relSub,
       replace: duplicateResolution === 'replace',
       createVersion: duplicateResolution === 'version',
       ...info
-    })
-  }
+    }
+  })
 
   return {
     baseFolder: cleanBase,
@@ -404,7 +419,7 @@ async function writeAssetMetadata (author, token, damPath, rawMetadata = {}) {
 
   for (const delay of retryDelays) {
     if (delay) await sleep(delay)
-    const res = await fetch(url, {
+    const res = await fetchWithTimeout(url, {
       method: 'PUT',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -563,8 +578,7 @@ async function completeBatchUpload (author, token, files = [], sharedMetadata = 
     throw err
   }
 
-  const results = []
-  for (const f of files) {
+  const results = await mapWithConcurrency(files, 4, async (f) => {
     const fileName = validateFileName(f.fileName)
     const targetFolder = String(f.targetFolder || '').replace(/\/+$/, '')
     if (!isDamFolder(targetFolder)) {
@@ -605,7 +619,7 @@ async function completeBatchUpload (author, token, files = [], sharedMetadata = 
     if (f.replace) formParams.replace = 'true'
     if (f.createVersion) formParams.createVersion = 'true'
 
-    const completeRes = await fetch(`${author}${encodedFolder}.completeUpload.json`, {
+    const completeRes = await fetchWithTimeout(`${author}${encodedFolder}.completeUpload.json`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -621,14 +635,14 @@ async function completeBatchUpload (author, token, files = [], sharedMetadata = 
     const damPath = `${targetFolder}/${fileName}`
     const writtenProps = await writeAssetMetadata(author, token, damPath, mergedMeta)
 
-    results.push({
+    return {
       clientId: f.clientId || fileName,
       fileName,
       targetFolder,
       damPath,
       appliedMetadata: writtenProps
-    })
-  }
+    }
+  })
 
   return {
     completedCount: results.length,

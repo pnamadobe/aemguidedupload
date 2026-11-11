@@ -297,6 +297,12 @@ export default function ModalGuidedUpload () {
   const [completedResult, setCompletedResult] = useState(null);
   const completedResultRef = useRef(null);
   const refreshSentRef = useRef(false);
+  const uploadAbortRef = useRef(null);
+
+  const fileDedupKey = (item) => {
+    const lm = (item && item.lastModified) || (item && item.file && item.file.lastModified) || 0;
+    return `${item.relativePath}|${item.size}|${lm}`;
+  };
 
   const postHostMessage = (payload) => {
     try {
@@ -407,6 +413,7 @@ export default function ModalGuidedUpload () {
             file: f,
             name: f.name,
             size: f.size,
+            lastModified: f.lastModified || 0,
             mimeType: f.type || 'application/octet-stream',
             relativePath: rel,
             subfolder
@@ -414,8 +421,8 @@ export default function ModalGuidedUpload () {
         }
         if (mapped.length > 0) {
           setQueuedFiles((prev) => {
-            const existingKeys = new Set(prev.map((p) => `${p.relativePath}|${p.size}`));
-            const fresh = mapped.filter((m) => !existingKeys.has(`${m.relativePath}|${m.size}`));
+            const existingKeys = new Set(prev.map(fileDedupKey));
+            const fresh = mapped.filter((m) => !existingKeys.has(fileDedupKey(m)));
             return [...prev, ...fresh];
           });
           setHandoffSource('chrome-extension');
@@ -510,13 +517,14 @@ export default function ModalGuidedUpload () {
       file: it.file,
       name: it.name,
       size: it.size,
+      lastModified: (it.file && it.file.lastModified) || it.lastModified || 0,
       mimeType: it.mimeType || (it.file && it.file.type) || 'application/octet-stream',
       relativePath: it.relativePath || it.name,
       subfolder: it.subfolder || ''
     }));
     setQueuedFiles((prev) => {
-      const existingKeys = new Set(prev.map((p) => `${p.relativePath}|${p.size}`));
-      const fresh = mapped.filter((m) => !existingKeys.has(`${m.relativePath}|${m.size}`));
+      const existingKeys = new Set(prev.map(fileDedupKey));
+      const fresh = mapped.filter((m) => !existingKeys.has(fileDedupKey(m)));
       return [...prev, ...fresh];
     });
   };
@@ -583,6 +591,12 @@ export default function ModalGuidedUpload () {
   };
 
   const closeDialog = () => {
+    if (uploadAbortRef.current) {
+      try {
+        uploadAbortRef.current.abort();
+      } catch (e) { /* ignore */ }
+      uploadAbortRef.current = null;
+    }
     if (guestConnection && guestConnection.host?.modal?.closeDialog) {
       guestConnection.host.modal.closeDialog();
     }
@@ -684,6 +698,8 @@ export default function ModalGuidedUpload () {
       }
 
       // Step 2: Direct browser-to-Blob PUT for each file
+      const abortController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      uploadAbortRef.current = abortController;
       const fileById = new Map(namingPlan.items.map((it) => [it.id, it]));
       for (let i = 0; i < initiatedFiles.length; i++) {
         const desc = initiatedFiles[i];
@@ -700,15 +716,25 @@ export default function ModalGuidedUpload () {
           currentFilePercent: 0
         });
 
-        await uploadBinaryToPresignedUris(localItem.file, desc.uploadURIs, ({ percent }) => {
-          setUploadProgress({
-            currentFile: desc.fileName,
-            completedFiles: i,
-            totalFiles: initiatedFiles.length,
-            currentFilePercent: percent
-          });
-        });
+        await uploadBinaryToPresignedUris(
+          localItem.file,
+          desc.uploadURIs,
+          ({ percent }) => {
+            setUploadProgress({
+              currentFile: desc.fileName,
+              completedFiles: i,
+              totalFiles: initiatedFiles.length,
+              currentFilePercent: percent
+            });
+          },
+          {
+            minPartSize: desc.minPartSize,
+            maxPartSize: desc.maxPartSize,
+            signal: abortController ? abortController.signal : undefined
+          }
+        );
       }
+      uploadAbortRef.current = null;
 
       // Step 3: Complete upload & write governed schema metadata to jcr:content/metadata
       // Note: If dc:title was left blank, omit it so AEM's built-in AI-Generated Metadata

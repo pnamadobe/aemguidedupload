@@ -9,7 +9,17 @@
  * governance fields plus naming tokens.
  */
 
-const { encodeDamPath } = require('./utils')
+const { encodeDamPath, fetchWithTimeout } = require('./utils')
+
+const SCHEMA_CACHE_TTL_MS = 2 * 60 * 1000
+const TAGS_CACHE_TTL_MS = 5 * 60 * 1000
+const schemaCache = new Map()
+const taxonomyTagsCache = new Map()
+
+function clearSchemaResolverCache () {
+  schemaCache.clear()
+  taxonomyTagsCache.clear()
+}
 
 const SYSTEM_TABS = new Set([
   'iptc',
@@ -550,7 +560,7 @@ function getDefaultFallbackFields () {
 
 async function fetchJsonSafe (url, token) {
   try {
-    const res = await fetch(url, {
+    const res = await fetchWithTimeout(url, {
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: 'application/json'
@@ -610,7 +620,14 @@ async function discoverFolderSchemaAssignment (author, token, folderPath) {
  * Resolves the full metadata schema for a target DAM folder.
  */
 async function resolveFolderSchema (author, token, folderPath) {
-  const assignment = await discoverFolderSchemaAssignment(author, token, folderPath)
+  const cleanFolder = String(folderPath || '/content/dam').replace(/\/+$/, '') || '/content/dam'
+  const cacheKey = `${author}|${cleanFolder}`
+  const cached = schemaCache.get(cacheKey)
+  if (cached && Date.now() < cached.expiresAt) {
+    return cached.value
+  }
+
+  const assignment = await discoverFolderSchemaAssignment(author, token, cleanFolder)
 
   // Determine candidate form/schema slug
   let slug = 'default'
@@ -711,7 +728,7 @@ async function resolveFolderSchema (author, token, folderPath) {
   const optionalFields = finalFields.filter((f) => !f.required)
   const naming = buildNamingTokensAndPattern(finalFields, slug)
 
-  return {
+  const result = {
     folderPath,
     schemaName: slug,
     inheritedFrom: assignment.inheritedFrom,
@@ -725,6 +742,11 @@ async function resolveFolderSchema (author, token, folderPath) {
     allFields: finalFields,
     naming
   }
+  schemaCache.set(cacheKey, {
+    value: result,
+    expiresAt: Date.now() + SCHEMA_CACHE_TTL_MS
+  })
+  return result
 }
 
 /**
@@ -773,6 +795,11 @@ async function fetchTagsUnderRootPath (author, token, rootTag) {
  * Guided Upload modal can display and search real taxonomy tag IDs (`namespace:tag`).
  */
 async function fetchTaxonomyTags (author, token) {
+  const cached = taxonomyTagsCache.get(author)
+  if (cached && Date.now() < cached.expiresAt) {
+    return cached.value
+  }
+
   const data = await fetchJsonSafe(`${author}/content/cq:tags.3.json`, token)
   if (!data || typeof data !== 'object') {
     return []
@@ -805,7 +832,12 @@ async function fetchTaxonomyTags (author, token) {
     walkNamespace(nsVal, nsKey, [], [nsTitle])
   }
 
-  return tags.sort((a, b) => a.label.localeCompare(b.label))
+  const sorted = tags.sort((a, b) => a.label.localeCompare(b.label))
+  taxonomyTagsCache.set(author, {
+    value: sorted,
+    expiresAt: Date.now() + TAGS_CACHE_TTL_MS
+  })
+  return sorted
 }
 
 module.exports = {
@@ -819,5 +851,6 @@ module.exports = {
   discoverFolderSchemaAssignment,
   resolveFolderSchema,
   fetchTagsUnderRootPath,
-  fetchTaxonomyTags
+  fetchTaxonomyTags,
+  clearSchemaResolverCache
 }

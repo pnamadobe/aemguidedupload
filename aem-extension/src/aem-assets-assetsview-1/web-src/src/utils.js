@@ -10,7 +10,8 @@ export async function actionWebInvoke (actionUrl, headers = {}, params = {}, opt
   };
 
   const fetchConfig = {
-    headers: actionHeaders
+    headers: actionHeaders,
+    ...(options && options.signal ? { signal: options.signal } : {})
   };
 
   if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
@@ -49,27 +50,58 @@ export async function actionWebInvoke (actionUrl, headers = {}, params = {}, opt
 }
 
 /**
+ * Computes the optimal part size and number of parts for AEM Direct Binary Upload,
+ * honoring `minPartSize` and `maxPartSize` when returned by `initiateUpload.json`.
+ */
+export function computeUploadPartPlan (totalBytes, uriCount, minPartSize = 0, maxPartSize = 0) {
+  const size = Math.max(0, Number(totalBytes) || 0);
+  const count = Math.max(1, Number(uriCount) || 1);
+  if (size === 0 || count === 1) {
+    return { partCount: 1, partSize: size };
+  }
+
+  let partSize = Math.ceil(size / count);
+  const min = Number(minPartSize) || 0;
+  const max = Number(maxPartSize) || 0;
+
+  if (min > 0 && partSize < min) {
+    partSize = min;
+  }
+  if (max > 0 && partSize > max) {
+    partSize = max;
+  }
+
+  const partCount = Math.max(1, Math.min(count, Math.ceil(size / partSize)));
+  return { partCount, partSize };
+}
+
+/**
  * Uploads a File/Blob directly from the browser to AEM's pre-signed cloud storage `uploadURIs`.
  * Zero file bytes pass through Adobe I/O Runtime.
  */
-export async function uploadBinaryToPresignedUris (file, uploadURIs = [], onProgress) {
+export async function uploadBinaryToPresignedUris (file, uploadURIs = [], onProgress, options = {}) {
   if (!Array.isArray(uploadURIs) || !uploadURIs.length) {
     throw new Error(`No pre-signed uploadURIs provided for ${file.name}`);
   }
 
   const totalBytes = file.size;
-  const partCount = uploadURIs.length;
-  const partSize = Math.ceil(totalBytes / partCount);
+  const { partCount, partSize } = computeUploadPartPlan(
+    totalBytes,
+    uploadURIs.length,
+    options.minPartSize,
+    options.maxPartSize
+  );
   let uploadedBytes = 0;
 
   for (let i = 0; i < partCount; i++) {
     const start = i * partSize;
-    const end = Math.min((i + 1) * partSize, totalBytes);
+    const end = i === partCount - 1 ? totalBytes : Math.min((i + 1) * partSize, totalBytes);
     const chunk = file.slice(start, end);
 
     const res = await fetch(uploadURIs[i], {
       method: 'PUT',
-      body: chunk
+      body: chunk,
+      ...(options.signal ? { signal: options.signal } : {})
     });
 
     if (!(res.status === 201 || res.ok)) {

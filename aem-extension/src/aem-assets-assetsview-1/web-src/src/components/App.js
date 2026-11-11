@@ -21,15 +21,15 @@ function App () {
     console.error('[Guided Upload] Render error:', e, componentStack);
   }
 
-  function fallbackComponent ({ componentStack, error }) {
+  function fallbackComponent ({ error }) {
     return (
       <React.Fragment>
         <h2 style={{ textAlign: 'center', marginTop: '20px' }}>
           Guided Upload Extension Error
         </h2>
-        <pre style={{ padding: '16px', whiteSpace: 'pre-wrap' }}>
-          {(error && error.message) + '\n' + componentStack}
-        </pre>
+        <p style={{ padding: '16px', textAlign: 'center' }}>
+          {(error && error.message) || 'An unexpected error occurred in the Guided Upload extension.'}
+        </p>
       </React.Fragment>
     );
   }
