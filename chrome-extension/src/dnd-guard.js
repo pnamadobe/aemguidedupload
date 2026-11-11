@@ -178,8 +178,12 @@
     }, 4500);
   }
 
+  function isBypassedEvent (e) {
+    return Boolean((e && e.__guBypassGuard) || globalThis.__guBypassGuardActive);
+  }
+
   function onDragEnter (e) {
-    if (!isGuardActive() || !isFileDragEvent(e)) return;
+    if (isBypassedEvent(e) || !isGuardActive() || !isFileDragEvent(e)) return;
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
@@ -189,7 +193,7 @@
   onDragEnter.__guInternal = true;
 
   function onDragOver (e) {
-    if (!isGuardActive() || !isFileDragEvent(e)) return;
+    if (isBypassedEvent(e) || !isGuardActive() || !isFileDragEvent(e)) return;
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
@@ -201,7 +205,7 @@
   onDragOver.__guInternal = true;
 
   function onDragLeave (e) {
-    if (!isGuardActive()) return;
+    if (isBypassedEvent(e) || !isGuardActive()) return;
     dragDepth = Math.max(0, dragDepth - 1);
     if (dragDepth === 0 || e.relatedTarget === null) {
       hideDropOverlay();
@@ -210,7 +214,7 @@
   onDragLeave.__guInternal = true;
 
   async function onDrop (e) {
-    if (!isGuardActive() || !isFileDragEvent(e)) return;
+    if (isBypassedEvent(e) || !isGuardActive() || !isFileDragEvent(e)) return;
 
     e.preventDefault();
     e.stopPropagation();

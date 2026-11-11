@@ -631,6 +631,84 @@ export default function ModalGuidedUpload () {
     closeDialog();
   };
 
+  const attemptNativeUploadHandoff = (actionUrl, headers) => {
+    const hasSubfolders = namingPlan.items.some((item) => Boolean(item.cleanSubfolder));
+    if (hasSubfolders) {
+      return Promise.resolve(false);
+    }
+
+    return new Promise((resolve) => {
+      const handoffId = `handoff-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      let settled = false;
+
+      const onAck = (event) => {
+        const data = event && event.data;
+        if (!data || data[HANDOFF_MESSAGE_NS] !== 'NATIVE_UPLOAD_ACK') return;
+        if (data.handoffId && data.handoffId !== handoffId) return;
+        if (settled) return;
+        settled = true;
+        window.removeEventListener('message', onAck);
+        resolve(true);
+      };
+
+      window.addEventListener('message', onAck);
+
+      try {
+        const handoffFiles = namingPlan.items.map((item) => {
+          const orig = item.file;
+          const governedFile = new File([orig], item.governedName, {
+            type: item.mimeType || (orig && orig.type) || 'application/octet-stream',
+            lastModified: (orig && orig.lastModified) || Date.now()
+          });
+          const perFileTitle = perAssetTitles[item.id];
+          return {
+            clientId: item.id,
+            file: governedFile,
+            fileName: item.governedName,
+            originalName: item.name,
+            fileSize: item.size,
+            mimeType: item.mimeType,
+            subfolder: item.cleanSubfolder || '',
+            targetFolder: item.targetFolder,
+            damPath: item.damPath,
+            metadata: perFileTitle ? { 'dc:title': perFileTitle } : {}
+          };
+        });
+
+        postHostMessage({
+          [HANDOFF_MESSAGE_NS]: 'ALLOW_NATIVE_ADD_ASSETS_ONCE',
+          handoffId
+        });
+        postHostMessage({
+          [HANDOFF_MESSAGE_NS]: 'HANDOFF_TO_NATIVE_UPLOAD',
+          handoffId,
+          baseFolder: folderPath,
+          files: handoffFiles,
+          sharedMetadata: metadataValues,
+          actionUrl,
+          authHeaders: headers,
+          ...(aemAuthorUrl ? { aemAuthorUrl } : {}),
+          handoffStartedAt: Date.now()
+        });
+      } catch (e) {
+        if (!settled) {
+          settled = true;
+          window.removeEventListener('message', onAck);
+          resolve(false);
+        }
+        return;
+      }
+
+      setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          window.removeEventListener('message', onAck);
+          resolve(false);
+        }
+      }, 450);
+    });
+  };
+
   const handleCommitUpload = async () => {
     setUploadError('');
     if (!queuedFiles.length) {
@@ -654,7 +732,7 @@ export default function ModalGuidedUpload () {
     }
 
     setUploading(true);
-    setUploadPhase('Ensuring folder hierarchy & initiating direct binary upload in AEM…');
+    setUploadPhase('Handing off governed files to AEM Upload Manager…');
     setUploadProgress({
       currentFile: '',
       completedFiles: 0,
@@ -667,6 +745,17 @@ export default function ModalGuidedUpload () {
       if (!headers.Authorization) {
         throw new Error('Missing user authentication token from AEM Assets View host. Please reload and sign in.');
       }
+
+      // Primary path: Hand off governed, renamed File objects to AEM's native OOTB Upload Manager
+      // (invokes OOTB Upload Manager progress drawer, OOTB Duplicate Resolution dialog, and native grid refresh,
+      // while modal-bridge writes Step 2 governed metadata on completeUpload.json).
+      const handedOffToNative = await attemptNativeUploadHandoff(actionUrl, headers);
+      if (handedOffToNative) {
+        closeDialog();
+        return;
+      }
+
+      setUploadPhase('Ensuring folder hierarchy & initiating direct binary upload in AEM…');
 
       // Step 1: Initiate batch upload (creates subfolders + returns pre-signed uploadURIs)
       const initPayload = {

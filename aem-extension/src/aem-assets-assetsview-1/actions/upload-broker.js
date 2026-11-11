@@ -252,27 +252,158 @@ function normalizeMetadataForAem (rawMetadata = {}) {
 
 /**
  * Writes normalized metadata properties to an asset's `jcr:content/metadata` via the AEM Assets HTTP API.
+ * Retries transient 404/409 responses while AEM finalizes the JCR asset node after `completeUpload.json`.
  */
 async function writeAssetMetadata (author, token, damPath, rawMetadata = {}) {
   const properties = normalizeMetadataForAem(rawMetadata)
   if (!Object.keys(properties).length) return properties
 
-  const res = await fetch(aemAssetsApiUrl(author, damPath), {
-    method: 'PUT',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      class: 'asset',
-      properties
-    })
-  })
+  const url = aemAssetsApiUrl(author, damPath)
+  const retryDelays = [0, 400, 900, 1800]
+  let lastStatus = 0
 
-  if (!res.ok) {
-    throw new Error(`Metadata write failed for ${damPath} (HTTP ${res.status})`)
+  for (const delay of retryDelays) {
+    if (delay) await sleep(delay)
+    const res = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        class: 'asset',
+        properties
+      })
+    })
+    if (res.ok) {
+      return properties
+    }
+    lastStatus = res.status
+    if (res.status !== 404 && res.status !== 409) {
+      break
+    }
   }
-  return properties
+
+  throw new Error(`Metadata write failed for ${damPath} (HTTP ${lastStatus})`)
+}
+
+function buildKeepBothCandidates (fileName) {
+  const dot = fileName.lastIndexOf('.')
+  const stem = dot > 0 ? fileName.slice(0, dot) : fileName
+  const ext = dot > 0 ? fileName.slice(dot) : ''
+  return [
+    fileName,
+    `${stem}-1${ext}`,
+    `${stem}_1${ext}`,
+    `${stem} (1)${ext}`,
+    `${stem}-2${ext}`
+  ]
+}
+
+async function findRecentlyCommittedAssetPath (author, token, targetFolder, fileName, committedSinceMs) {
+  const candidates = buildKeepBothCandidates(fileName)
+  const threshold = Number(committedSinceMs) - 10000
+
+  for (let i = 0; i < candidates.length; i++) {
+    const candidateName = candidates[i]
+    const candidateDamPath = `${targetFolder}/${candidateName}`
+    try {
+      const res = await fetch(`${aemAssetsApiUrl(author, candidateDamPath)}.json`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/json'
+        }
+      })
+      if (!res.ok) continue
+      const data = await res.json()
+      const props = (data && data.properties) || {}
+      const meta = props.metadata || {}
+
+      // If this is a "Keep both" duplicate-renamed variant that doesn't have our marker yet, match it
+      if (i > 0 && meta['dam:guidedUploadCommitted'] !== 'true') {
+        return { fileName: candidateName, damPath: candidateDamPath }
+      }
+
+      const timestamps = [
+        props['jcr:lastModified'],
+        props['jcr:created'],
+        meta['jcr:lastModified'],
+        meta['dc:modified']
+      ]
+        .filter(Boolean)
+        .map((t) => Date.parse(String(t)))
+        .filter((n) => Number.isFinite(n))
+
+      if (timestamps.some((ts) => ts >= threshold)) {
+        return { fileName: candidateName, damPath: candidateDamPath }
+      }
+    } catch (e) {
+      // ignore check error and try next candidate
+    }
+  }
+  return null
+}
+
+/**
+ * Applies governed metadata to assets uploaded via AEM's native OOTB Upload Manager.
+ * Supports both direct invocation (after `.completeUpload.json` finishes) and timestamp-gated
+ * polling (`onlyIfCommittedSince`) that respects AEM's OOTB Duplicate Resolution dialog.
+ */
+async function applyBatchMetadata (author, token, files = [], sharedMetadata = {}, options = {}) {
+  if (!Array.isArray(files) || !files.length) {
+    throw new Error('files array is required to apply metadata')
+  }
+
+  const onlyIfCommittedSince = Number(options.onlyIfCommittedSince) || 0
+  const results = []
+  const pending = []
+
+  for (const f of files) {
+    const fileName = validateFileName(f.fileName)
+    const targetFolder = String(f.targetFolder || '').replace(/\/+$/, '')
+    if (!isDamFolder(targetFolder)) {
+      throw new Error(`Invalid targetFolder for "${fileName}": ${targetFolder}`)
+    }
+
+    let resolvedFileName = fileName
+    let damPath = `${targetFolder}/${fileName}`
+
+    if (onlyIfCommittedSince > 0) {
+      const hit = await findRecentlyCommittedAssetPath(author, token, targetFolder, fileName, onlyIfCommittedSince)
+      if (!hit) {
+        pending.push({
+          clientId: f.clientId || fileName,
+          fileName,
+          targetFolder
+        })
+        continue
+      }
+      resolvedFileName = hit.fileName
+      damPath = hit.damPath
+    }
+
+    const mergedMeta = {
+      ...(sharedMetadata || {}),
+      ...(f.metadata || {})
+    }
+    const writtenProps = await writeAssetMetadata(author, token, damPath, mergedMeta)
+
+    results.push({
+      clientId: f.clientId || fileName,
+      fileName: resolvedFileName,
+      originalGovernedName: fileName,
+      targetFolder,
+      damPath,
+      appliedMetadata: writtenProps
+    })
+  }
+
+  return {
+    completedCount: results.length,
+    assets: results,
+    pendingCount: pending.length,
+    pending
+  }
 }
 
 /**
@@ -344,5 +475,6 @@ module.exports = {
   initiateBatchUpload,
   normalizeMetadataForAem,
   writeAssetMetadata,
+  applyBatchMetadata,
   completeBatchUpload
 }

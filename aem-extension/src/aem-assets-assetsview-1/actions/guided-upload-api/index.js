@@ -25,7 +25,8 @@ const {
 } = require('../schema-resolver')
 const {
   initiateBatchUpload,
-  completeBatchUpload
+  completeBatchUpload,
+  applyBatchMetadata
 } = require('../upload-broker')
 
 async function main (params = {}) {
@@ -103,6 +104,23 @@ async function main (params = {}) {
           body: {
             ok: true,
             ...completed
+          }
+        }
+      }
+
+      case 'applyMetadata': {
+        const applied = await applyBatchMetadata(
+          author,
+          token,
+          params.files || [],
+          params.sharedMetadata || {},
+          { onlyIfCommittedSince: params.onlyIfCommittedSince }
+        )
+        return {
+          statusCode: 200,
+          body: {
+            ok: true,
+            ...applied
           }
         }
       }

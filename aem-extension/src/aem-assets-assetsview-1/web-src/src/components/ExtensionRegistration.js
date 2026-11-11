@@ -39,6 +39,7 @@ function normalizeDamFolderPath (resource) {
 function ExtensionRegistration () {
   useEffect(() => {
     let activeGuestConnection = null;
+    let allowNativeAddAssetsUntil = 0;
 
     const openGuidedUploadModal = async ({ context, resource, folderOverride, source = 'addAssets' }) => {
       if (!activeGuestConnection) return;
@@ -91,6 +92,10 @@ function ExtensionRegistration () {
     const onWindowMessage = (event) => {
       const data = event && event.data;
       if (!data || typeof data !== 'object') return;
+      if (data[HANDOFF_MESSAGE_NS] === 'ALLOW_NATIVE_ADD_ASSETS_ONCE' || data[HANDOFF_MESSAGE_NS] === 'HANDOFF_TO_NATIVE_UPLOAD') {
+        allowNativeAddAssetsUntil = Date.now() + 10000;
+        return;
+      }
       if (data[HANDOFF_MESSAGE_NS] === 'OPEN_MODAL_FROM_DROP') {
         openGuidedUploadModal({
           context: 'assets',
@@ -156,6 +161,11 @@ function ExtensionRegistration () {
             },
             async overrideButton ({ buttonId, context, resource }) {
               if (buttonId === 'addAssets') {
+                if (Date.now() < allowNativeAddAssetsUntil) {
+                  allowNativeAddAssetsUntil = 0;
+                  // Return false so AEM Assets View runs its native OOTB Upload Manager
+                  return false;
+                }
                 await openGuidedUploadModal({
                   context,
                   resource,

@@ -28,7 +28,8 @@ const {
 const {
   normalizeMetadataForAem,
   initiateBatchUpload,
-  completeBatchUpload
+  completeBatchUpload,
+  applyBatchMetadata
 } = require('../actions/upload-broker');
 
 jest.mock('@adobe/aio-sdk', () => ({
@@ -467,6 +468,72 @@ describe('4. Upload Broker & Metadata Normalization', () => {
       expect(compRes.completedCount).toBe(1);
       expect(compRes.assets[0].damPath).toBe('/content/dam/26H2/vail/assets/campaign/hero/vail-winter-001.jpg');
       expect(compRes.assets[0].appliedMetadata['cq:tags']).toEqual(['region:amer']);
+    } finally {
+      global.fetch = origFetch;
+    }
+  });
+
+  test('applies governed metadata after OOTB Upload Manager commits, including Keep Both (-1) duplicate renames', async () => {
+    const origFetch = global.fetch;
+    const putPaths = [];
+    const handoffStartedAt = Date.parse('2026-11-11T14:00:00.000Z');
+
+    global.fetch = async (url, opts = {}) => {
+      const method = opts.method || 'GET';
+      // Original asset existed before handoff (old timestamp -> user did not replace it)
+      if (method === 'GET' && url.endsWith('/api/assets/26H2/vail/assets/vail-winter-001.jpg.json')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            properties: {
+              'jcr:created': '2025-01-01T00:00:00.000Z',
+              'jcr:lastModified': '2025-01-01T00:00:00.000Z',
+              metadata: { 'dam:guidedUploadCommitted': 'true' }
+            }
+          })
+        };
+      }
+      // Keep-both duplicate copy created by OOTB Upload Manager
+      if (method === 'GET' && url.endsWith('/api/assets/26H2/vail/assets/vail-winter-001-1.jpg.json')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            properties: {
+              'jcr:created': '2026-11-11T14:00:05.000Z',
+              metadata: {}
+            }
+          })
+        };
+      }
+      if (method === 'PUT' && url.includes('/api/assets/26H2/vail/assets/')) {
+        putPaths.push(url);
+        return { ok: true, status: 200, text: async () => '{}' };
+      }
+      return { ok: false, status: 404 };
+    };
+
+    try {
+      const res = await applyBatchMetadata(
+        'https://author-p59602-e520244.adobeaemcloud.com',
+        'token-abc',
+        [{
+          clientId: 'c1',
+          fileName: 'vail-winter-001.jpg',
+          targetFolder: '/content/dam/26H2/vail/assets',
+          metadata: { 'dc:title': 'Keep Both Hero' }
+        }],
+        { 'xcm:keywords': ['region:amer'] },
+        { onlyIfCommittedSince: handoffStartedAt }
+      );
+
+      expect(res.completedCount).toBe(1);
+      expect(res.assets[0].fileName).toBe('vail-winter-001-1.jpg');
+      expect(res.assets[0].damPath).toBe('/content/dam/26H2/vail/assets/vail-winter-001-1.jpg');
+      expect(putPaths).toEqual([
+        'https://author-p59602-e520244.adobeaemcloud.com/api/assets/26H2/vail/assets/vail-winter-001-1.jpg'
+      ]);
     } finally {
       global.fetch = origFetch;
     }
