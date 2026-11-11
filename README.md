@@ -82,10 +82,11 @@ npm test
   - The Adobe I/O Runtime action (`guided-upload-api`) enforces `require-adobe-auth: true` at the gateway and validates the caller's `Authorization: Bearer <token>` HTTP header inside `resolveAemContext()`.
   - Static service-account (`AEM_SC_JSON`), developer-token (`AEM_DEV_TOKEN`), and request-body token (`userToken`) fallbacks are excluded so every DAM read/write executes strictly under the signed-in user's AEM permissions.
   - The modal reads `gc.sharedContext.get('auth')` immediately upon UIX connection (`attach()`) and passes `Authorization` (and `x-gw-ims-org-id`) exclusively via HTTP headers.
-- **Server-Pinned AEM Author Allowlist (C2)**:
-  - `AEM_AUTHOR_URL` is bound as a finalized (`final: true`) Runtime action input in `ext.config.yaml` (supports a single AEM Author origin or a comma-separated allowlist via `AEM_AUTHOR_URL` / `AEM_ALLOWED_AUTHORS`).
-  - All backend operations default to the server-pinned `AEM_AUTHOR_URL` and reject any request supplying a non-allowlisted `aemAuthorUrl` with `403 Forbidden`, preventing Bearer token redirection/SSRF to foreign `author-p*-e*.adobeaemcloud.com` instances.
-  - The web UI never reads or trusts `aemAuthorUrl` from URL query parameters, `localStorage`, or `window.postMessage` payloads.
+- **Server-Pinned AEM Author Allowlist & Multi-Tenant Adobe Exchange Mode (C2)**:
+  - `AEM_AUTHOR_URL` is bound as a finalized (`final: true`) Runtime action input in `ext.config.yaml` (supports a single AEM Author origin, a comma-separated allowlist via `AEM_AUTHOR_URL` / `AEM_ALLOWED_AUTHORS`, or `AEM_AUTHOR_URL=*` for multi-tenant public Adobe Exchange deployments).
+  - In single-tenant mode, all backend operations default to the server-pinned `AEM_AUTHOR_URL` and reject any request supplying a non-allowlisted `aemAuthorUrl` with `403 Forbidden`.
+  - In multi-tenant Exchange mode (`AEM_AUTHOR_URL=*`), the backend validates the host against strict Cloud Manager author format (`/^https:\/\/author-p\d+-e\d+\.adobeaemcloud\.com$/i`) and authenticates with the caller's own IMS Bearer token.
+  - The web UI discovers `aemAuthorUrl` from the trusted UIX host connection (`ExtensionRegistration.js`) and never trusts URL query parameters or `window.postMessage` host overrides.
 - **Cross-Frame `postMessage` Origin Allowlist & Targeted File Delivery (H1 & H2)**:
   - Every `window.addEventListener('message')` handler in the web app and companion Chrome extension validates `event.origin` against an explicit Adobe origin allowlist (`https://experience.adobe.com`, `https://experience-stage.adobe.com`, `https://*.adobeaemcloud.com`, `https://*.adobeio-static.net`, and `localhost`).
   - Dropped `File` objects are never broadcast with `postMessage(..., '*')`; `DROPPED_FILES` is delivered exclusively to the verified `event.source` and `event.origin` that signaled `MODAL_READY`.
@@ -107,7 +108,8 @@ npm test
 ### 3. Performance & Robustness
 - **Multi-Part Upload Chunk Sizing & Cancellation (M1, M2)**:
   - `computeUploadPartPlan()` honors `minPartSize` and `maxPartSize` from `initiateUpload.json`, and `AbortController` cancels in-flight binary `PUT` requests if the modal is closed.
-- **Timeouts, Caching & Bounded Concurrency (M3, M4, P1–P4)**:
+- **Timeouts, User-Scoped Caching, Enterprise Taxonomy Fallback & Bounded Concurrency (M3, M4, P1–P4)**:
   - All backend AEM requests use a 15-second `AbortSignal.timeout(15000)`.
-  - Warm Runtime containers cache resolved folder schemas (2-minute TTL) and `/content/cq:tags.3.json` taxonomy trees (5-minute TTL).
+  - Warm Runtime containers cache resolved folder schemas (2-minute TTL) and `/content/cq:tags` taxonomy trees (5-minute TTL), scoped by a SHA-256 fingerprint of the caller's token (`tokenCacheScope`) so users with different JCR ACLs never share cached results.
+  - When `/content/cq:tags.3.json` hits Sling's 1,000-node limit (`HTTP 300 Multiple Choices`) on large enterprise taxonomies, `fetchTaxonomyTags()` automatically falls back to `/content/cq:tags.1.json` + parallel per-namespace `.2.json` fetches.
   - Multi-file `initiate` and `complete` operations execute with bounded concurrency (`mapWithConcurrency`, up to 4 in parallel).
