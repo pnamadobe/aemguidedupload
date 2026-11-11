@@ -746,12 +746,9 @@ export default function ModalGuidedUpload () {
         baseFolder: folderPath
       };
       completedResultRef.current = summary;
-      refreshSentRef.current = false;
-      setCompletedResult(summary);
+      refreshSentRef.current = true;
 
-      // Notify parent/top window immediately so it can stage or trigger a folder contents refresh
-      postHostMessage({
-        [HANDOFF_MESSAGE_NS]: 'UPLOAD_COMPLETED',
+      const refreshPayload = {
         folderPath,
         baseFolder: folderPath,
         completedCount: completeRes.completedCount || initiatedFiles.length,
@@ -760,16 +757,29 @@ export default function ModalGuidedUpload () {
           targetFolder: a.targetFolder,
           damPath: a.damPath
         }))
+      };
+
+      // Notify parent/top window immediately to refresh the AEM Assets View folder contents
+      postHostMessage({
+        [HANDOFF_MESSAGE_NS]: 'UPLOAD_COMPLETED',
+        ...refreshPayload
+      });
+      postHostMessage({
+        [HANDOFF_MESSAGE_NS]: 'REFRESH_FOLDER_VIEW',
+        ...refreshPayload
       });
 
       if (guestConnection && guestConnection.host?.toast?.display) {
         try {
-          await guestConnection.host.toast.display({
+          guestConnection.host.toast.display({
             variant: 'positive',
-            message: `Guided Upload committed ${completeRes.completedCount || initiatedFiles.length} governed asset(s) to ${folderPath}`
+            message: `Uploaded ${completeRes.completedCount || initiatedFiles.length} governed asset(s) to ${folderPath}`
           });
         } catch (e) { /* ignore toast error */ }
       }
+
+      // Immediately close the modal and return the user to the main AEM Assets View app
+      closeDialog();
     } catch (err) {
       setUploadError(err.message || String(err));
     } finally {
