@@ -2,7 +2,7 @@
   "name": "guided-upload",
   "id": "guided-upload",
   "description": "Guided Upload wizard modal enforcing folder metadata schemas, usage rights, folder structure, and naming conventions in AEM Assets View",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "headerMenuButtons": [
     {
       "label": "Guided Upload",

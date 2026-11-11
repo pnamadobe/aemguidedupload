@@ -759,11 +759,7 @@ export default function ModalGuidedUpload () {
         }))
       };
 
-      // Notify parent/top window immediately to refresh the AEM Assets View folder contents
-      postHostMessage({
-        [HANDOFF_MESSAGE_NS]: 'UPLOAD_COMPLETED',
-        ...refreshPayload
-      });
+      // Notify parent/top window once to refresh the AEM Assets View folder contents
       postHostMessage({
         [HANDOFF_MESSAGE_NS]: 'REFRESH_FOLDER_VIEW',
         ...refreshPayload

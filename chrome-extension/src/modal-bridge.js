@@ -292,6 +292,10 @@
 
     if (data[HANDOFF_NS] === 'REFRESH_FOLDER_VIEW') {
       noStoreUntil = Date.now() + 15000;
+      if (modalCloseWatcher) {
+        clearInterval(modalCloseWatcher);
+        modalCloseWatcher = null;
+      }
       const summary = {
         folderPath: data.folderPath || (pendingUploadRefresh && pendingUploadRefresh.folderPath) || '/content/dam',
         baseFolder: data.baseFolder || (pendingUploadRefresh && pendingUploadRefresh.baseFolder) || '/content/dam',
@@ -461,7 +465,7 @@
 
   function refreshAssetsViewFolder (summary = {}) {
     const now = Date.now();
-    if (now - lastRefreshTriggeredAt < 900) return;
+    if (now - lastRefreshTriggeredAt < 4000) return;
 
     const currentHash = location.hash || '';
     const match = currentHash.match(/^(#?[^?]*\/assets\/browse)(\/content\/dam(?:\/[^?#]*)?)?(\?.*)?$/i);
@@ -493,12 +497,6 @@
       }
     }
 
-    showRefreshToast(
-      `🔄 Refreshing folder contents (${count} governed asset${count === 1 ? '' : 's'} committed)…`,
-      'info',
-      5000
-    );
-
     const encodePath = (p) => String(p || '/content/dam')
       .split('/')
       .map((seg) => encodeURIComponent(seg))
@@ -512,7 +510,7 @@
       ? `${prefix}${encodePath(parentFolder)}${querySuffix}`
       : `${prefix}${querySuffix}`;
 
-    // Stage 1: Fast SPA route bounce so React Router re-fetches the target folder contents without a full reload
+    // Single fast SPA route bounce so React Router re-fetches the target folder contents without a page reload
     setTimeout(() => {
       try {
         location.hash = bounceHash;
@@ -521,38 +519,23 @@
         try {
           location.hash = targetHash;
         } catch (e) { /* ignore */ }
-      }, 240);
-    }, 120);
-
-    // Stage 2: Poll DOM for the newly uploaded file/subfolder card to highlight it; if Assets View's internal
-    // state cache prevented the grid from updating after the route bounce, fall back to a clean reload.
-    let attempts = 0;
-    const maxAttempts = 6;
-    const poll = setInterval(() => {
-      attempts++;
-      if (highlightExpectedItemsInDom(expectedNames)) {
-        clearInterval(poll);
         const firstLabel = expectedNames[0] ? `"${expectedNames[0]}"` : `${count} asset(s)`;
         showRefreshToast(
-          `✓ Folder updated — ${firstLabel}${count > 1 ? ` (+${count - 1} more)` : ''} now visible in ${targetFolder}`,
+          `✓ Uploaded ${firstLabel}${count > 1 ? ` (+${count - 1} more)` : ''} to ${targetFolder}`,
           'positive',
-          5500
+          5000
         );
-        return;
-      }
-      if (attempts >= maxAttempts) {
+      }, 140);
+    }, 80);
+
+    // Optional non-intrusive card highlight once the refreshed grid renders
+    let attempts = 0;
+    const poll = setInterval(() => {
+      attempts++;
+      if (highlightExpectedItemsInDom(expectedNames) || attempts >= 6) {
         clearInterval(poll);
-        try {
-          if (location.hash !== targetHash) {
-            location.hash = targetHash;
-          }
-          showRefreshToast('🔄 Reloading folder view to display newly uploaded assets…', 'info', 4000);
-          setTimeout(() => {
-            location.reload();
-          }, 150);
-        } catch (e) { /* ignore */ }
       }
-    }, 420);
+    }, 400);
   }
 
   function stageDroppedFilesAndOpenModal (items = []) {

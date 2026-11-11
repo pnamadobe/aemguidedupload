@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AEM Guided Upload — Drag-and-Drop Guardrail",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Blocks raw ungoverned drag-and-drop uploads on the AEM Assets View grid and hands dropped files and folder structures directly to the Guided Upload wizard modal.",
   "icons": {
     "16": "icons/icon16.png",
