@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { attach } from '@adobe/uix-guest';
 import {
   Flex,
@@ -295,6 +295,46 @@ export default function ModalGuidedUpload () {
   const [uploadProgress, setUploadProgress] = useState({ currentFile: '', completedFiles: 0, totalFiles: 0, currentFilePercent: 0 });
   const [uploadError, setUploadError] = useState('');
   const [completedResult, setCompletedResult] = useState(null);
+  const completedResultRef = useRef(null);
+  const refreshSentRef = useRef(false);
+
+  const postHostMessage = (payload) => {
+    try {
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage(payload, '*');
+      }
+      if (window.top && window.top !== window && window.top !== window.parent) {
+        window.top.postMessage(payload, '*');
+      }
+    } catch (e) {
+      // ignore cross-frame postMessage errors
+    }
+  };
+
+  useEffect(() => {
+    const onPageHide = () => {
+      const done = completedResultRef.current;
+      if (done && !refreshSentRef.current) {
+        refreshSentRef.current = true;
+        postHostMessage({
+          [HANDOFF_MESSAGE_NS]: 'REFRESH_FOLDER_VIEW',
+          folderPath: done.baseFolder || '/content/dam',
+          baseFolder: done.baseFolder || '/content/dam',
+          completedCount: done.completedCount || (done.assets ? done.assets.length : 1),
+          assets: (done.assets || []).map((a) => ({
+            fileName: a.fileName,
+            targetFolder: a.targetFolder,
+            damPath: a.damPath
+          }))
+        });
+      }
+    };
+    window.addEventListener('pagehide', onPageHide);
+    return () => {
+      window.removeEventListener('pagehide', onPageHide);
+      onPageHide();
+    };
+  }, []);
 
   // Attach to AEM Assets View host
   useEffect(() => {
@@ -571,6 +611,26 @@ export default function ModalGuidedUpload () {
     }
   };
 
+  const triggerFolderRefreshAndClose = (targetFolderOverride) => {
+    const done = completedResult || completedResultRef.current;
+    const destFolder = targetFolderOverride || folderPath;
+    if (done) {
+      refreshSentRef.current = true;
+      postHostMessage({
+        [HANDOFF_MESSAGE_NS]: 'REFRESH_FOLDER_VIEW',
+        folderPath: destFolder,
+        baseFolder: folderPath,
+        completedCount: done.completedCount || (done.assets ? done.assets.length : 1),
+        assets: (done.assets || []).map((a) => ({
+          fileName: a.fileName,
+          targetFolder: a.targetFolder,
+          damPath: a.damPath
+        }))
+      });
+    }
+    closeDialog();
+  };
+
   const handleCommitUpload = async () => {
     setUploadError('');
     if (!queuedFiles.length) {
@@ -676,7 +736,26 @@ export default function ModalGuidedUpload () {
       };
 
       const completeRes = await actionWebInvoke(actionUrl, headers, completePayload);
-      setCompletedResult(completeRes);
+      const summary = {
+        ...completeRes,
+        baseFolder: folderPath
+      };
+      completedResultRef.current = summary;
+      refreshSentRef.current = false;
+      setCompletedResult(summary);
+
+      // Notify parent/top window immediately so it can stage or trigger a folder contents refresh
+      postHostMessage({
+        [HANDOFF_MESSAGE_NS]: 'UPLOAD_COMPLETED',
+        folderPath,
+        baseFolder: folderPath,
+        completedCount: completeRes.completedCount || initiatedFiles.length,
+        assets: (completeRes.assets || []).map((a) => ({
+          fileName: a.fileName,
+          targetFolder: a.targetFolder,
+          damPath: a.damPath
+        }))
+      });
 
       if (guestConnection && guestConnection.host?.toast?.display) {
         try {
@@ -789,20 +868,44 @@ export default function ModalGuidedUpload () {
                     </tbody>
                   </table>
                 </View>
-                <Flex justifyContent="end" gap="size-125" marginTop="size-100">
-                  <Button
-                    variant="secondary"
-                    onPress={() => {
-                      setCompletedResult(null);
-                      handleClearFiles();
-                      setStep(1);
-                    }}
-                  >
-                    Upload More Assets
-                  </Button>
-                  <Button variant="cta" onPress={closeDialog}>
-                    Done
-                  </Button>
+                <Flex justifyContent="space-between" alignItems="center" wrap gap="size-125" marginTop="size-100">
+                  <Text UNSAFE_style={{ fontSize: '12px', opacity: 0.8 }}>
+                    Closing this dialog will automatically refresh the AEM Assets View folder contents.
+                  </Text>
+                  <Flex gap="size-125" wrap>
+                    <Button
+                      variant="secondary"
+                      onPress={() => {
+                        setCompletedResult(null);
+                        handleClearFiles();
+                        setStep(1);
+                      }}
+                    >
+                      Upload More Assets
+                    </Button>
+                    {(() => {
+                      const subfolders = [...new Set(
+                        (completedResult.assets || [])
+                          .map((a) => a.targetFolder)
+                          .filter((tf) => tf && tf !== folderPath)
+                      )];
+                      if (subfolders.length === 1) {
+                        const leaf = subfolders[0].split('/').pop();
+                        return (
+                          <Button
+                            variant="primary"
+                            onPress={() => triggerFolderRefreshAndClose(subfolders[0])}
+                          >
+                            {`Open Subfolder (${leaf})`}
+                          </Button>
+                        );
+                      }
+                      return null;
+                    })()}
+                    <Button variant="cta" onPress={() => triggerFolderRefreshAndClose(folderPath)}>
+                      Done & Refresh Folder
+                    </Button>
+                  </Flex>
                 </Flex>
               </Flex>
             </View>

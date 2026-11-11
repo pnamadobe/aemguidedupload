@@ -90,12 +90,25 @@ function ExtensionRegistration () {
 
     const onWindowMessage = (event) => {
       const data = event && event.data;
-      if (!data || data[HANDOFF_MESSAGE_NS] !== 'OPEN_MODAL_FROM_DROP') return;
-      openGuidedUploadModal({
-        context: 'assets',
-        folderOverride: data.folderPath || '/content/dam',
-        source: 'chrome-dnd-guard'
-      }).catch(console.error);
+      if (!data || typeof data !== 'object') return;
+      if (data[HANDOFF_MESSAGE_NS] === 'OPEN_MODAL_FROM_DROP') {
+        openGuidedUploadModal({
+          context: 'assets',
+          folderOverride: data.folderPath || '/content/dam',
+          source: 'chrome-dnd-guard'
+        }).catch(console.error);
+        return;
+      }
+      if (data[HANDOFF_MESSAGE_NS] === 'REFRESH_FOLDER_VIEW') {
+        const relay = () => {
+          try {
+            if (window.parent && window.parent !== window) window.parent.postMessage(data, '*');
+            if (window.top && window.top !== window && window.top !== window.parent) window.top.postMessage(data, '*');
+          } catch (e) { /* ignore */ }
+        };
+        setTimeout(relay, 120);
+        setTimeout(relay, 420);
+      }
     };
 
     window.addEventListener('message', onWindowMessage);

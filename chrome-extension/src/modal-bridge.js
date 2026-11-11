@@ -8,10 +8,31 @@
   const PENDING_TTL_MS = 45000;
 
   let pendingBatch = null;
+  let pendingUploadRefresh = null;
+  let lastRefreshTriggeredAt = 0;
+  let noStoreUntil = 0;
+  let refreshToastHost = null;
+  let refreshToastTimer = null;
   let lastKnownContext = {
     aemAuthorUrl: '',
     folderPath: '/content/dam'
   };
+
+  // Bypass browser HTTP cache on repository/folder-listing fetches right after an upload completes
+  try {
+    const origFetch = window.fetch;
+    if (typeof origFetch === 'function') {
+      window.fetch = function (input, init) {
+        if (Date.now() < noStoreUntil) {
+          const urlStr = typeof input === 'string' ? input : (input && input.url) || '';
+          if (/\/adobe\/repository|\/api\/assets|\/content\/dam/i.test(urlStr)) {
+            init = { ...(init || {}), cache: 'no-store' };
+          }
+        }
+        return origFetch.call(this, input, init);
+      };
+    }
+  } catch (e) { /* ignore fetch hook errors */ }
 
   function extractContextFromUrlString (href = '') {
     try {
@@ -185,8 +206,293 @@
           pendingBatch = null;
         }, 1500);
       }
+      return;
+    }
+
+    if (data[HANDOFF_NS] === 'UPLOAD_COMPLETED') {
+      noStoreUntil = Date.now() + 30000;
+      pendingUploadRefresh = {
+        folderPath: data.folderPath || '/content/dam',
+        baseFolder: data.baseFolder || data.folderPath || '/content/dam',
+        completedCount: data.completedCount || (Array.isArray(data.assets) ? data.assets.length : 1),
+        assets: Array.isArray(data.assets) ? data.assets : [],
+        completedAt: Date.now()
+      };
+      if (!data.__relayed) {
+        broadcastToAllFrames({
+          ...data,
+          [HANDOFF_NS]: 'UPLOAD_COMPLETED',
+          __relayed: true
+        });
+      }
+      watchForModalCloseAndRefresh();
+      return;
+    }
+
+    if (data[HANDOFF_NS] === 'REFRESH_FOLDER_VIEW') {
+      noStoreUntil = Date.now() + 15000;
+      const summary = {
+        folderPath: data.folderPath || (pendingUploadRefresh && pendingUploadRefresh.folderPath) || '/content/dam',
+        baseFolder: data.baseFolder || (pendingUploadRefresh && pendingUploadRefresh.baseFolder) || '/content/dam',
+        completedCount: data.completedCount || (pendingUploadRefresh && pendingUploadRefresh.completedCount) || 1,
+        assets: Array.isArray(data.assets) && data.assets.length
+          ? data.assets
+          : ((pendingUploadRefresh && pendingUploadRefresh.assets) || [])
+      };
+      pendingUploadRefresh = null;
+
+      if (!data.__relayed) {
+        broadcastToAllFrames({
+          ...data,
+          ...summary,
+          [HANDOFF_NS]: 'REFRESH_FOLDER_VIEW',
+          __relayed: true
+        });
+      }
+      refreshAssetsViewFolder(summary);
     }
   });
+
+  let modalCloseWatcher = null;
+
+  function isModalIframePresent () {
+    const all = queryAllDeep(document);
+    for (const el of all) {
+      if (!el || (el.tagName || '').toLowerCase() !== 'iframe') continue;
+      const src = (el.getAttribute && el.getAttribute('src')) || el.src || '';
+      if (/modal-guided-upload/i.test(src)) return true;
+    }
+    return false;
+  }
+
+  function watchForModalCloseAndRefresh () {
+    if (modalCloseWatcher) clearInterval(modalCloseWatcher);
+    let sawModal = isModalIframePresent();
+    let ticks = 0;
+    modalCloseWatcher = setInterval(() => {
+      ticks++;
+      if (!pendingUploadRefresh || ticks > 150) {
+        clearInterval(modalCloseWatcher);
+        modalCloseWatcher = null;
+        return;
+      }
+      const present = isModalIframePresent();
+      if (present) {
+        sawModal = true;
+      } else if (sawModal && !present) {
+        clearInterval(modalCloseWatcher);
+        modalCloseWatcher = null;
+        const summary = pendingUploadRefresh;
+        pendingUploadRefresh = null;
+        broadcastToAllFrames({
+          ...summary,
+          [HANDOFF_NS]: 'REFRESH_FOLDER_VIEW',
+          __relayed: true
+        });
+        refreshAssetsViewFolder(summary);
+      }
+    }, 350);
+  }
+
+  function showRefreshToast (message, variant = 'info', durationMs = 5000) {
+    let isTop = false;
+    try {
+      isTop = window.top === window;
+    } catch (e) { /* cross-origin */ }
+    if (!isTop) return;
+
+    if (refreshToastTimer) {
+      clearTimeout(refreshToastTimer);
+      refreshToastTimer = null;
+    }
+    if (refreshToastHost) {
+      refreshToastHost.remove();
+      refreshToastHost = null;
+    }
+
+    const bg = variant === 'positive' ? '#12805c' : '#0d66d0';
+    refreshToastHost = document.createElement('div');
+    const shadow = refreshToastHost.attachShadow({ mode: 'open' });
+    shadow.innerHTML = `
+      <style>
+        :host {
+          all: initial;
+          position: fixed;
+          bottom: 24px;
+          right: 24px;
+          z-index: 2147483647;
+          font-family: adobe-clean, "Source Sans Pro", -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+        .toast {
+          background: ${bg};
+          color: #ffffff;
+          padding: 12px 18px;
+          border-radius: 8px;
+          font-size: 13px;
+          font-weight: 600;
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+      </style>
+      <div class="toast"></div>
+    `;
+    const toastEl = shadow.querySelector('.toast');
+    if (toastEl) toastEl.textContent = message;
+    (document.body || document.documentElement).appendChild(refreshToastHost);
+
+    refreshToastTimer = setTimeout(() => {
+      if (refreshToastHost) {
+        refreshToastHost.remove();
+        refreshToastHost = null;
+      }
+    }, durationMs);
+  }
+
+  function highlightExpectedItemsInDom (expectedNames = []) {
+    if (!expectedNames.length) return false;
+    const lowerTargets = expectedNames.map((n) => String(n || '').toLowerCase()).filter(Boolean);
+    if (!lowerTargets.length) return false;
+
+    const all = queryAllDeep(document);
+    let matchedEl = null;
+
+    for (const el of all) {
+      if (!el || el.nodeType !== 1) continue;
+      const text = (el.textContent || '').trim().toLowerCase();
+      const aria = ((el.getAttribute && (el.getAttribute('aria-label') || el.getAttribute('title'))) || '').trim().toLowerCase();
+      const isDirectMatch = lowerTargets.some(
+        (t) => text === t || aria === t || aria.includes(t)
+      );
+      if (isDirectMatch) {
+        const card = (el.closest && (
+          el.closest('[role="row"]') ||
+          el.closest('[role="gridcell"]') ||
+          el.closest('[role="listitem"]') ||
+          el.closest('sp-card') ||
+          el.closest('article')
+        )) || el;
+        try {
+          card.style.outline = '2px solid #12805c';
+          card.style.boxShadow = '0 0 0 4px rgba(18, 128, 92, 0.25)';
+          card.style.borderRadius = '6px';
+          card.style.transition = 'outline 0.3s ease, box-shadow 0.3s ease';
+          setTimeout(() => {
+            try {
+              card.style.outline = '';
+              card.style.boxShadow = '';
+            } catch (e) { /* ignore */ }
+          }, 6000);
+        } catch (e) { /* ignore style errors */ }
+        if (!matchedEl) matchedEl = card;
+      }
+    }
+
+    if (matchedEl && typeof matchedEl.scrollIntoView === 'function') {
+      try {
+        matchedEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      } catch (e) { /* ignore */ }
+      return true;
+    }
+    return false;
+  }
+
+  function refreshAssetsViewFolder (summary = {}) {
+    const now = Date.now();
+    if (now - lastRefreshTriggeredAt < 900) return;
+
+    const currentHash = location.hash || '';
+    const match = currentHash.match(/^(#?[^?]*\/assets\/browse)(\/content\/dam(?:\/[^?#]*)?)?(\?.*)?$/i);
+    if (!match) return;
+
+    lastRefreshTriggeredAt = now;
+    noStoreUntil = Date.now() + 15000;
+
+    const prefix = match[1];
+    const currentFolder = match[2] ? decodeURIComponent(match[2]).replace(/\/+$/, '') : '/content/dam';
+    const querySuffix = match[3] || '';
+    const targetFolder = (summary.folderPath && summary.folderPath.startsWith('/content/dam'))
+      ? summary.folderPath.replace(/\/+$/, '')
+      : currentFolder;
+
+    const count = Number(summary.completedCount) || 1;
+    const assets = Array.isArray(summary.assets) ? summary.assets : [];
+
+    // Names to look for in the refreshed folder view (either file names or newly created direct subfolder names)
+    const expectedNames = [];
+    for (const a of assets) {
+      if (a.targetFolder === targetFolder && a.fileName) {
+        expectedNames.push(a.fileName);
+      } else if (a.targetFolder && a.targetFolder.startsWith(targetFolder + '/')) {
+        const relSub = a.targetFolder.slice(targetFolder.length + 1).split('/')[0];
+        if (relSub) expectedNames.push(relSub);
+      } else if (a.fileName) {
+        expectedNames.push(a.fileName);
+      }
+    }
+
+    showRefreshToast(
+      `🔄 Refreshing folder contents (${count} governed asset${count === 1 ? '' : 's'} committed)…`,
+      'info',
+      5000
+    );
+
+    const encodePath = (p) => String(p || '/content/dam')
+      .split('/')
+      .map((seg) => encodeURIComponent(seg))
+      .join('/');
+
+    const targetHash = `${prefix}${encodePath(targetFolder)}${querySuffix}`;
+    const parentFolder = targetFolder !== '/content/dam'
+      ? (targetFolder.split('/').slice(0, -1).join('/') || '/content/dam')
+      : '/content/dam';
+    const bounceHash = targetFolder !== '/content/dam'
+      ? `${prefix}${encodePath(parentFolder)}${querySuffix}`
+      : `${prefix}${querySuffix}`;
+
+    // Stage 1: Fast SPA route bounce so React Router re-fetches the target folder contents without a full reload
+    setTimeout(() => {
+      try {
+        location.hash = bounceHash;
+      } catch (e) { /* ignore */ }
+      setTimeout(() => {
+        try {
+          location.hash = targetHash;
+        } catch (e) { /* ignore */ }
+      }, 240);
+    }, 120);
+
+    // Stage 2: Poll DOM for the newly uploaded file/subfolder card to highlight it; if Assets View's internal
+    // state cache prevented the grid from updating after the route bounce, fall back to a clean reload.
+    let attempts = 0;
+    const maxAttempts = 6;
+    const poll = setInterval(() => {
+      attempts++;
+      if (highlightExpectedItemsInDom(expectedNames)) {
+        clearInterval(poll);
+        const firstLabel = expectedNames[0] ? `"${expectedNames[0]}"` : `${count} asset(s)`;
+        showRefreshToast(
+          `✓ Folder updated — ${firstLabel}${count > 1 ? ` (+${count - 1} more)` : ''} now visible in ${targetFolder}`,
+          'positive',
+          5500
+        );
+        return;
+      }
+      if (attempts >= maxAttempts) {
+        clearInterval(poll);
+        try {
+          if (location.hash !== targetHash) {
+            location.hash = targetHash;
+          }
+          showRefreshToast('🔄 Reloading folder view to display newly uploaded assets…', 'info', 4000);
+          setTimeout(() => {
+            location.reload();
+          }, 150);
+        } catch (e) { /* ignore */ }
+      }
+    }, 420);
+  }
 
   function stageDroppedFilesAndOpenModal (items = []) {
     const { folderPath, aemAuthorUrl } = parseAssetsViewLocation();
