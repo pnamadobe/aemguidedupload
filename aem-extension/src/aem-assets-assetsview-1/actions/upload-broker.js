@@ -136,10 +136,43 @@ async function initiateSingleFileUpload (author, token, targetFolder, fileName, 
   }
 }
 
+async function assetExistsInAem (author, token, damPath) {
+  try {
+    const res = await fetch(`${aemAssetsApiUrl(author, damPath)}.json`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json'
+      }
+    })
+    return Boolean(res && res.ok && res.status === 200)
+  } catch (e) {
+    return false
+  }
+}
+
+async function resolveUniqueFileNameInAem (author, token, targetFolder, fileName, usedInBatch = new Set()) {
+  const dot = fileName.lastIndexOf('.')
+  const stem = dot > 0 ? fileName.slice(0, dot) : fileName
+  const ext = dot > 0 ? fileName.slice(dot) : ''
+
+  for (let i = 1; i <= 50; i++) {
+    const candidate = `${stem}-${i}${ext}`
+    const fullPath = `${targetFolder}/${candidate}`
+    if (usedInBatch.has(fullPath)) continue
+    const exists = await assetExistsInAem(author, token, fullPath)
+    if (!exists) {
+      usedInBatch.add(fullPath)
+      return candidate
+    }
+  }
+  return `${stem}-${Date.now()}${ext}`
+}
+
 /**
- * Ensures all destination subfolders exist and initiates direct binary uploads for a batch of files.
+ * Ensures all destination subfolders exist, checks for duplicate assets in AEM,
+ * and initiates direct binary uploads for a batch of files.
  */
-async function initiateBatchUpload (author, token, baseFolder, files = [], folderTitles = {}) {
+async function initiateBatchUpload (author, token, baseFolder, files = [], folderTitles = {}, options = {}) {
   const cleanBase = String(baseFolder || '').replace(/\/+$/, '')
   if (!isDamFolder(cleanBase)) {
     throw new Error(`Invalid target DAM folder: ${baseFolder}`)
@@ -148,11 +181,11 @@ async function initiateBatchUpload (author, token, baseFolder, files = [], folde
     throw new Error('files array must contain at least one file to initiate upload')
   }
 
+  const duplicateResolution = String(options.duplicateResolution || '').trim().toLowerCase()
   const subfolders = files.map((f) => f && f.subfolder).filter(Boolean)
   const createdFolders = await ensureFolderHierarchy(author, token, cleanBase, subfolders, folderTitles)
 
-  const initiated = []
-  for (const f of files) {
+  const resolvedTargets = files.map((f) => {
     const fileName = validateFileName(f.fileName)
     const size = Number(f.fileSize)
     if (!Number.isFinite(size) || size <= 0) {
@@ -160,10 +193,61 @@ async function initiateBatchUpload (author, token, baseFolder, files = [], folde
     }
     const relSub = sanitizeRelativeSubfolder(f.subfolder || '')
     const targetFolder = relSub ? `${cleanBase}/${relSub}` : cleanBase
-    const info = await initiateSingleFileUpload(author, token, targetFolder, fileName, size, f.mimeType)
-    initiated.push({
+    return {
+      raw: f,
       clientId: f.clientId || fileName,
-      subfolder: relSub,
+      fileName,
+      size,
+      mimeType: f.mimeType,
+      relSub,
+      targetFolder,
+      damPath: `${targetFolder}/${fileName}`
+    }
+  })
+
+  if (duplicateResolution === 'ask' || duplicateResolution === 'keep-both' || duplicateResolution === 'skip') {
+    const duplicates = []
+    for (const item of resolvedTargets) {
+      const exists = await assetExistsInAem(author, token, item.damPath)
+      item.existsInAem = exists
+      if (exists) {
+        duplicates.push({
+          clientId: item.clientId,
+          fileName: item.fileName,
+          targetFolder: item.targetFolder,
+          damPath: item.damPath
+        })
+      }
+    }
+
+    if (duplicates.length > 0 && duplicateResolution === 'ask') {
+      return {
+        baseFolder: cleanBase,
+        ensuredFolders: createdFolders,
+        duplicateConflict: true,
+        duplicates,
+        files: []
+      }
+    }
+  }
+
+  const usedInBatch = new Set(resolvedTargets.map((t) => t.damPath))
+  const initiated = []
+
+  for (const item of resolvedTargets) {
+    if (item.existsInAem && duplicateResolution === 'skip') {
+      continue
+    }
+    let finalFileName = item.fileName
+    if (item.existsInAem && duplicateResolution === 'keep-both') {
+      finalFileName = await resolveUniqueFileNameInAem(author, token, item.targetFolder, item.fileName, usedInBatch)
+    }
+    const info = await initiateSingleFileUpload(author, token, item.targetFolder, finalFileName, item.size, item.mimeType)
+    initiated.push({
+      clientId: item.clientId,
+      subfolder: item.relSub,
+      replace: duplicateResolution === 'replace',
+      createVersion: duplicateResolution === 'version',
       ...info
     })
   }
@@ -171,6 +255,8 @@ async function initiateBatchUpload (author, token, baseFolder, files = [], folde
   return {
     baseFolder: cleanBase,
     ensuredFolders: createdFolders,
+    duplicateConflict: false,
+    duplicates: [],
     files: initiated
   }
 }
@@ -426,18 +512,22 @@ async function completeBatchUpload (author, token, files = [], sharedMetadata = 
     }
 
     const encodedFolder = encodeDamPath(targetFolder)
+    const formParams = {
+      fileName,
+      mimeType: f.mimeType || 'application/octet-stream',
+      uploadToken: f.uploadToken,
+      fileSize: String(f.fileSize || 0)
+    }
+    if (f.replace) formParams.replace = 'true'
+    if (f.createVersion) formParams.createVersion = 'true'
+
     const completeRes = await fetch(`${author}${encodedFolder}.completeUpload.json`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/x-www-form-urlencoded'
       },
-      body: new URLSearchParams({
-        fileName,
-        mimeType: f.mimeType || 'application/octet-stream',
-        uploadToken: f.uploadToken,
-        fileSize: String(f.fileSize || 0)
-      })
+      body: new URLSearchParams(formParams)
     })
 
     if (!completeRes.ok) {

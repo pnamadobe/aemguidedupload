@@ -81,7 +81,8 @@ async function main (params = {}) {
           token,
           baseFolder,
           params.files || [],
-          params.folderTitles || {}
+          params.folderTitles || {},
+          { duplicateResolution: params.duplicateResolution }
         )
         return {
           statusCode: 200,

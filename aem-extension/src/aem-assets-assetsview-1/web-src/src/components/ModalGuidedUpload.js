@@ -294,6 +294,7 @@ export default function ModalGuidedUpload () {
   const [uploadPhase, setUploadPhase] = useState('');
   const [uploadProgress, setUploadProgress] = useState({ currentFile: '', completedFiles: 0, totalFiles: 0, currentFilePercent: 0 });
   const [uploadError, setUploadError] = useState('');
+  const [duplicateConflicts, setDuplicateConflicts] = useState([]);
   const [completedResult, setCompletedResult] = useState(null);
   const completedResultRef = useRef(null);
   const refreshSentRef = useRef(false);
@@ -631,86 +632,12 @@ export default function ModalGuidedUpload () {
     closeDialog();
   };
 
-  const attemptNativeUploadHandoff = (actionUrl, headers) => {
-    const hasSubfolders = namingPlan.items.some((item) => Boolean(item.cleanSubfolder));
-    if (hasSubfolders) {
-      return Promise.resolve(false);
-    }
-
-    return new Promise((resolve) => {
-      const handoffId = `handoff-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      let settled = false;
-
-      const onAck = (event) => {
-        const data = event && event.data;
-        if (!data || data[HANDOFF_MESSAGE_NS] !== 'NATIVE_UPLOAD_ACK') return;
-        if (data.handoffId && data.handoffId !== handoffId) return;
-        if (settled) return;
-        settled = true;
-        window.removeEventListener('message', onAck);
-        resolve(true);
-      };
-
-      window.addEventListener('message', onAck);
-
-      try {
-        const handoffFiles = namingPlan.items.map((item) => {
-          const orig = item.file;
-          const governedFile = new File([orig], item.governedName, {
-            type: item.mimeType || (orig && orig.type) || 'application/octet-stream',
-            lastModified: (orig && orig.lastModified) || Date.now()
-          });
-          const perFileTitle = perAssetTitles[item.id];
-          return {
-            clientId: item.id,
-            file: governedFile,
-            fileName: item.governedName,
-            originalName: item.name,
-            fileSize: item.size,
-            mimeType: item.mimeType,
-            subfolder: item.cleanSubfolder || '',
-            targetFolder: item.targetFolder,
-            damPath: item.damPath,
-            metadata: perFileTitle ? { 'dc:title': perFileTitle } : {}
-          };
-        });
-
-        postHostMessage({
-          [HANDOFF_MESSAGE_NS]: 'ALLOW_NATIVE_ADD_ASSETS_ONCE',
-          handoffId
-        });
-        postHostMessage({
-          [HANDOFF_MESSAGE_NS]: 'HANDOFF_TO_NATIVE_UPLOAD',
-          handoffId,
-          baseFolder: folderPath,
-          files: handoffFiles,
-          sharedMetadata: metadataValues,
-          actionUrl,
-          authHeaders: headers,
-          ...(aemAuthorUrl ? { aemAuthorUrl } : {}),
-          handoffStartedAt: Date.now()
-        });
-      } catch (e) {
-        if (!settled) {
-          settled = true;
-          window.removeEventListener('message', onAck);
-          resolve(false);
-        }
-        return;
-      }
-
-      setTimeout(() => {
-        if (!settled) {
-          settled = true;
-          window.removeEventListener('message', onAck);
-          resolve(false);
-        }
-      }, 450);
-    });
-  };
-
-  const handleCommitUpload = async () => {
+  const handleCommitUpload = async (duplicateResolution = 'ask') => {
+    const resolutionMode = typeof duplicateResolution === 'string' ? duplicateResolution : 'ask';
     setUploadError('');
+    if (resolutionMode !== 'ask') {
+      setDuplicateConflicts([]);
+    }
     if (!queuedFiles.length) {
       setUploadError('Please add at least one file before uploading.');
       return;
@@ -721,7 +648,7 @@ export default function ModalGuidedUpload () {
       return;
     }
     if (!namingPlan.allValid) {
-      setUploadError('Please resolve filename validation issues before committing.');
+      setUploadError('Please resolve filename validation issues before uploading.');
       return;
     }
 
@@ -732,7 +659,7 @@ export default function ModalGuidedUpload () {
     }
 
     setUploading(true);
-    setUploadPhase('Handing off governed files to AEM Upload Manager…');
+    setUploadPhase('Checking destination folder & initiating upload in AEM…');
     setUploadProgress({
       currentFile: '',
       completedFiles: 0,
@@ -746,21 +673,11 @@ export default function ModalGuidedUpload () {
         throw new Error('Missing user authentication token from AEM Assets View host. Please reload and sign in.');
       }
 
-      // Primary path: Hand off governed, renamed File objects to AEM's native OOTB Upload Manager
-      // (invokes OOTB Upload Manager progress drawer, OOTB Duplicate Resolution dialog, and native grid refresh,
-      // while modal-bridge writes Step 2 governed metadata on completeUpload.json).
-      const handedOffToNative = await attemptNativeUploadHandoff(actionUrl, headers);
-      if (handedOffToNative) {
-        closeDialog();
-        return;
-      }
-
-      setUploadPhase('Ensuring folder hierarchy & initiating direct binary upload in AEM…');
-
-      // Step 1: Initiate batch upload (creates subfolders + returns pre-signed uploadURIs)
+      // Step 1: Initiate batch upload (checks duplicates, creates subfolders, returns pre-signed uploadURIs)
       const initPayload = {
         op: 'initiate',
         baseFolder: folderPath,
+        duplicateResolution: resolutionMode,
         ...(aemAuthorUrl ? { aemAuthorUrl } : {}),
         files: namingPlan.items.map((item) => ({
           clientId: item.id,
@@ -772,8 +689,21 @@ export default function ModalGuidedUpload () {
       };
 
       const initRes = await actionWebInvoke(actionUrl, headers, initPayload);
+      if (initRes && initRes.duplicateConflict && Array.isArray(initRes.duplicates) && initRes.duplicates.length > 0) {
+        setDuplicateConflicts(initRes.duplicates);
+        setUploading(false);
+        setUploadPhase('');
+        return;
+      }
+
       const initiatedFiles = (initRes && initRes.files) || [];
       if (!initiatedFiles.length) {
+        if (resolutionMode === 'skip') {
+          setUploading(false);
+          setUploadPhase('');
+          closeDialog();
+          return;
+        }
         throw new Error('AEM initiateUpload returned no file descriptors.');
       }
 
@@ -819,6 +749,8 @@ export default function ModalGuidedUpload () {
             mimeType: desc.mimeType,
             fileSize: desc.fileSize,
             uploadToken: desc.uploadToken,
+            replace: Boolean(desc.replace),
+            createVersion: Boolean(desc.createVersion),
             metadata: perFileTitle ? { 'dc:title': perFileTitle } : {}
           };
         })
@@ -922,7 +854,7 @@ export default function ModalGuidedUpload () {
                 isDisabled={queuedFiles.length === 0 || !validation.valid}
                 onPress={() => setStep(3)}
               >
-                3. Naming & Commit Upload
+                3. Naming & Upload
               </Button>
             </Flex>
           )}
@@ -1159,20 +1091,78 @@ export default function ModalGuidedUpload () {
                 </Flex>
               )}
 
-              {/* Upload Progress Banner */}
+              {/* Duplicate Asset Conflict Resolution Prompt */}
+              {duplicateConflicts.length > 0 && !uploading && (
+                <View borderWidth="thick" borderColor="notice" backgroundColor="gray-75" padding="size-200" borderRadius="regular">
+                  <Flex direction="column" gap="size-125">
+                    <Heading level={4} margin={0}>
+                      ⚠ Duplicate Asset{duplicateConflicts.length === 1 ? '' : 's'} Detected in AEM ({duplicateConflicts.length})
+                    </Heading>
+                    <Text UNSAFE_style={{ fontSize: '12.5px' }}>
+                      The following governed filename{duplicateConflicts.length === 1 ? ' already exists' : 's already exist'} in the target DAM folder:{' '}
+                      <b>{duplicateConflicts.map((d) => d.fileName).join(', ')}</b>. Choose how to handle duplicates:
+                    </Text>
+                    <Flex gap="size-100" wrap marginTop="size-50">
+                      <Button variant="cta" onPress={() => handleCommitUpload('keep-both')}>
+                        Keep Both (Auto-Rename -1)
+                      </Button>
+                      <Button variant="primary" onPress={() => handleCommitUpload('replace')}>
+                        Replace Existing
+                      </Button>
+                      <Button variant="secondary" onPress={() => handleCommitUpload('version')}>
+                        Create New Version
+                      </Button>
+                      <Button variant="secondary" onPress={() => handleCommitUpload('skip')}>
+                        Skip Duplicates
+                      </Button>
+                      <ActionButton isQuiet onPress={() => setDuplicateConflicts([])}>
+                        Cancel
+                      </ActionButton>
+                    </Flex>
+                  </Flex>
+                </View>
+              )}
+
+              {/* Upload Manager Progress Panel */}
               {uploading && (
-                <View backgroundColor="gray-100" padding="size-150" borderRadius="regular">
-                  <Flex alignItems="center" gap="size-150">
-                    <ProgressCircle size="S" isIndeterminate aria-label="Uploading" />
-                    <Flex direction="column" gap="size-50" flex="1">
-                      <Text><b>{uploadPhase}</b></Text>
+                <View borderWidth="thin" borderColor="dark" backgroundColor="gray-100" padding="size-200" borderRadius="regular">
+                  <Flex direction="column" gap="size-125">
+                    <Flex alignItems="center" justifyContent="space-between">
+                      <Flex alignItems="center" gap="size-125">
+                        <ProgressCircle size="S" isIndeterminate aria-label="Uploading" />
+                        <Text><b>Upload Manager — {uploadPhase}</b></Text>
+                      </Flex>
                       {uploadProgress.totalFiles > 0 && (
-                        <Text UNSAFE_style={{ fontSize: '12px' }}>
-                          File {uploadProgress.completedFiles + 1} of {uploadProgress.totalFiles}
-                          {uploadProgress.currentFile ? ` (${uploadProgress.currentFile}: ${uploadProgress.currentFilePercent}%)` : ''}
+                        <Text UNSAFE_style={{ fontSize: '12px', fontWeight: 700 }}>
+                          File {Math.min(uploadProgress.completedFiles + 1, uploadProgress.totalFiles)} of {uploadProgress.totalFiles}
+                          {uploadProgress.currentFile ? ` • ${uploadProgress.currentFilePercent}%` : ''}
                         </Text>
                       )}
                     </Flex>
+                    {uploadProgress.totalFiles > 0 && (
+                      <div style={{ width: '100%', height: '8px', background: '#dcdcdc', borderRadius: '999px', overflow: 'hidden' }}>
+                        <div
+                          style={{
+                            width: `${Math.min(
+                              100,
+                              Math.round(
+                                ((uploadProgress.completedFiles + (uploadProgress.currentFilePercent || 0) / 100) /
+                                  uploadProgress.totalFiles) *
+                                  100
+                              )
+                            )}%`,
+                            height: '100%',
+                            background: '#1473e6',
+                            transition: 'width 0.2s ease'
+                          }}
+                        />
+                      </div>
+                    )}
+                    {uploadProgress.currentFile && (
+                      <Text UNSAFE_style={{ fontSize: '12px', opacity: 0.85 }}>
+                        Streaming binary: <code>{uploadProgress.currentFile}</code> ({uploadProgress.currentFilePercent}%)
+                      </Text>
+                    )}
                   </Flex>
                 </View>
               )}
@@ -1215,18 +1205,16 @@ export default function ModalGuidedUpload () {
                       isDisabled={!validation.valid}
                       onPress={() => setStep(3)}
                     >
-                      Next: Review Naming & Commit
+                      Next: Review Naming & Upload
                     </Button>
                   )}
                   {step === 3 && (
                     <Button
                       variant="cta"
                       isDisabled={uploading || !validation.valid || !namingPlan.allValid || queuedFiles.length === 0}
-                      onPress={handleCommitUpload}
+                      onPress={() => handleCommitUpload('ask')}
                     >
-                      {uploading
-                        ? 'Uploading & Applying Metadata…'
-                        : `Commit Guided Upload (${namingPlan.totalCount} Asset${namingPlan.totalCount === 1 ? '' : 's'})`}
+                      {uploading ? 'Uploading…' : 'Upload'}
                     </Button>
                   )}
                 </ButtonGroup>
