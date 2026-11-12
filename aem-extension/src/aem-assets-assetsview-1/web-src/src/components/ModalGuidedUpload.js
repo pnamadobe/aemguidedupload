@@ -298,24 +298,30 @@ export default function ModalGuidedUpload () {
   const [storeLinkCopied, setStoreLinkCopied] = useState(false);
 
   const handleOpenOrCopyStoreUrl = async () => {
+    let copied = false;
     try {
       if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
         await navigator.clipboard.writeText(CHROME_WEBSTORE_URL);
-        setStoreLinkCopied(true);
-        setTimeout(() => setStoreLinkCopied(false), 4000);
+        copied = true;
       }
-    } catch (e) { /* ignore clipboard error */ }
+    } catch (e) { /* fallback to textarea copy inside iframe */ }
 
-    try {
-      const opened = window.open(CHROME_WEBSTORE_URL, '_blank', 'noopener,noreferrer');
-      if (!opened) {
-        setStoreLinkCopied(true);
-        setTimeout(() => setStoreLinkCopied(false), 5000);
-      }
-    } catch (e) {
-      setStoreLinkCopied(true);
-      setTimeout(() => setStoreLinkCopied(false), 5000);
+    if (!copied) {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = CHROME_WEBSTORE_URL;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      } catch (e) { /* ignore */ }
     }
+
+    setStoreLinkCopied(true);
+    setTimeout(() => setStoreLinkCopied(false), 5000);
   };
 
   // Schema & Metadata state
@@ -964,8 +970,8 @@ export default function ModalGuidedUpload () {
                   }}
                 >
                   {storeLinkCopied
-                    ? '✓ Web Store Link Copied (Paste in New Tab)'
-                    : 'Get Chrome Extension ↗'}
+                    ? '✓ Copied Web Store URL (Paste in New Tab)'
+                    : 'Copy Chrome Web Store Link'}
                 </button>
               </Flex>
             </div>
