@@ -1,6 +1,6 @@
 # AEM Guided Upload — App Builder UI Extension & Drag-and-Drop Guardrail
 
-[![Watch the AEM Guided Upload Demo](https://img.youtube.com/vi/3UbEF7ByLAw/maxresdefault.jpg)](https://youtu.be/3UbEF7ByLAw)
+[![Watch the AEM Guided Upload Demo](docs/guided-upload-hero.jpg)](https://youtu.be/3UbEF7ByLAw)
 
 > 🎥 **Demo Video:** [Watch AEM Guided Upload in action on YouTube](https://youtu.be/3UbEF7ByLAw)
 
