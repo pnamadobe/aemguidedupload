@@ -22,7 +22,7 @@ import Folder from '@spectrum-icons/workflow/Folder';
 import Edit from '@spectrum-icons/workflow/Edit';
 import Alert from '@spectrum-icons/workflow/Alert';
 
-import { extensionId, HANDOFF_MESSAGE_NS, STORAGE_KEY_CTX, isTrustedMessageOrigin } from './Constants';
+import { extensionId, HANDOFF_MESSAGE_NS, STORAGE_KEY_CTX, CHROME_WEBSTORE_URL, isTrustedMessageOrigin } from './Constants';
 import FolderDropzone, { shouldIgnoreFile } from './FolderDropzone';
 import DynamicSchemaForm, { humanTitleFromFileName } from './DynamicSchemaForm';
 import { validateMetadataValues } from './ValidationRules';
@@ -917,11 +917,41 @@ export default function ModalGuidedUpload () {
 
           {chromePluginDetected === false && (
             <div className="gu-card-subtle" style={{ borderColor: '#d7373f' }}>
-              <Flex alignItems="center" gap="size-100">
-                <Alert size="S" UNSAFE_style={{ color: '#d7373f', flexShrink: 0 }} />
-                <Text UNSAFE_style={{ fontSize: '12.5px', color: '#d7373f', fontWeight: 500 }}>
-                  <b>Companion Chrome Extension Not Active:</b> Browse-grid drag-and-drop protection and automatic folder refresh are inactive in this window. Install or enable the <b>AEM Guided Upload — Drag-and-Drop Guardrail</b> Chrome extension (and enable <i>Allow in Incognito</i> if using Incognito).
-                </Text>
+              <Flex alignItems="center" justifyContent="space-between" wrap gap="size-150">
+                <Flex alignItems="center" gap="size-100" flex="1">
+                  <Alert size="S" UNSAFE_style={{ color: '#d7373f', flexShrink: 0 }} />
+                  <Text UNSAFE_style={{ fontSize: '12.5px', color: '#d7373f', fontWeight: 500 }}>
+                    <b>Companion Chrome Extension Not Active:</b> Browse-grid drag-and-drop protection and automatic folder refresh require the{' '}
+                    <a
+                      href={CHROME_WEBSTORE_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ color: '#0265dc', fontWeight: 700, textDecoration: 'underline' }}
+                    >
+                      AEM Guided Upload — Drag-and-Drop Guardrail
+                    </a>{' '}
+                    Chrome extension (enable <i>Allow in Incognito</i> if using an Incognito window).
+                  </Text>
+                </Flex>
+                <a
+                  href={CHROME_WEBSTORE_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    padding: '5px 12px',
+                    borderRadius: '999px',
+                    backgroundColor: '#0265dc',
+                    color: '#ffffff',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    textDecoration: 'none',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  Install Chrome Extension ↗
+                </a>
               </Flex>
             </div>
           )}

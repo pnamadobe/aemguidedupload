@@ -1,6 +1,7 @@
 const extensionId = 'guided-upload';
 const HANDOFF_MESSAGE_NS = '__GUIDED_UPLOAD__';
 const STORAGE_KEY_CTX = 'guided_upload_ctx';
+const CHROME_WEBSTORE_URL = 'https://chromewebstore.google.com/detail/aem-guided-upload-%E2%80%94-drag/eledmafcpjjamagmlmppamiamdeekmpb';
 
 const TRUSTED_ORIGIN_PATTERNS = [
   /^https:\/\/experience\.adobe\.com$/i,
@@ -21,5 +22,6 @@ module.exports = {
   extensionId,
   HANDOFF_MESSAGE_NS,
   STORAGE_KEY_CTX,
+  CHROME_WEBSTORE_URL,
   isTrustedMessageOrigin
 };

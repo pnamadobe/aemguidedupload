@@ -65,13 +65,16 @@ npm test
 2. Open the preview link printed after `aio app run` / `aio app deploy`, or add `?ext=https://localhost:9080` to your AEM Assets View URL.
 3. Navigate to any DAM folder (for example `/content/dam/26H2/vail/assets` or `/content/dam/26H2/united`) and click **"Add assets"** in the top-right header.
 
-### 3. Load the Companion Drag-and-Drop Guardrail Chrome Extension (`chrome-extension/`)
-1. Open Chrome and navigate to `chrome://extensions`.
-2. Enable **Developer mode** (top right).
-3. Click **Load unpacked** and select `/Users/pnam/Sandbox/guidedupload/chrome-extension`.
-4. Drag any file or nested folder onto the AEM Assets View browse grid:
-   - The native ungoverned dropzone is blocked in the capture phase.
-   - The **Guided Upload** modal opens automatically with your dropped files and subfolder hierarchy pre-loaded.
+### 3. Install the Companion Drag-and-Drop Guardrail Chrome Extension (`chrome-extension/`)
+- **From the Chrome Web Store (Recommended):**
+  Install **[AEM Guided Upload — Drag-and-Drop Guardrail](https://chromewebstore.google.com/detail/aem-guided-upload-%E2%80%94-drag/eledmafcpjjamagmlmppamiamdeekmpb)**.
+- **Or Load Unpacked for Local Development:**
+  1. Open Chrome and navigate to `chrome://extensions`.
+  2. Enable **Developer mode** (top right).
+  3. Click **Load unpacked** and select `/Users/pnam/Sandbox/guidedupload/chrome-extension`.
+  4. Drag any file or nested folder onto the AEM Assets View browse grid:
+     - The native ungoverned dropzone is blocked in the capture phase.
+     - The **Guided Upload** modal opens automatically with your dropped files and subfolder hierarchy pre-loaded.
 
 ---
 
