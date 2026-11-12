@@ -295,6 +295,28 @@ export default function ModalGuidedUpload () {
   const [normalizeSubfolders, setNormalizeSubfolders] = useState(true);
   const [handoffSource, setHandoffSource] = useState(null);
   const [chromePluginDetected, setChromePluginDetected] = useState(null);
+  const [storeLinkCopied, setStoreLinkCopied] = useState(false);
+
+  const handleOpenOrCopyStoreUrl = async () => {
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        await navigator.clipboard.writeText(CHROME_WEBSTORE_URL);
+        setStoreLinkCopied(true);
+        setTimeout(() => setStoreLinkCopied(false), 4000);
+      }
+    } catch (e) { /* ignore clipboard error */ }
+
+    try {
+      const opened = window.open(CHROME_WEBSTORE_URL, '_blank', 'noopener,noreferrer');
+      if (!opened) {
+        setStoreLinkCopied(true);
+        setTimeout(() => setStoreLinkCopied(false), 5000);
+      }
+    } catch (e) {
+      setStoreLinkCopied(true);
+      setTimeout(() => setStoreLinkCopied(false), 5000);
+    }
+  };
 
   // Schema & Metadata state
   const [schemaLoading, setSchemaLoading] = useState(false);
@@ -921,37 +943,30 @@ export default function ModalGuidedUpload () {
                 <Flex alignItems="center" gap="size-100" flex="1">
                   <Alert size="S" UNSAFE_style={{ color: '#d7373f', flexShrink: 0 }} />
                   <Text UNSAFE_style={{ fontSize: '12.5px', color: '#d7373f', fontWeight: 500 }}>
-                    <b>Companion Chrome Extension Not Active:</b> Browse-grid drag-and-drop protection and automatic folder refresh require the{' '}
-                    <a
-                      href={CHROME_WEBSTORE_URL}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ color: '#0265dc', fontWeight: 700, textDecoration: 'underline' }}
-                    >
-                      AEM Guided Upload — Drag-and-Drop Guardrail
-                    </a>{' '}
-                    Chrome extension (enable <i>Allow in Incognito</i> if using an Incognito window).
+                    <b>Companion Chrome Extension Not Active:</b> Browse-grid drag-and-drop protection and automatic folder refresh require the <b>AEM Guided Upload — Drag-and-Drop Guardrail</b> Chrome extension (enable <i>Allow in Incognito</i> if using an Incognito window).
                   </Text>
                 </Flex>
-                <a
-                  href={CHROME_WEBSTORE_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <button
+                  type="button"
+                  onClick={handleOpenOrCopyStoreUrl}
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
-                    padding: '5px 12px',
+                    padding: '6px 12px',
                     borderRadius: '999px',
-                    backgroundColor: '#0265dc',
+                    border: 'none',
+                    cursor: 'pointer',
+                    backgroundColor: storeLinkCopied ? '#007a4d' : '#0265dc',
                     color: '#ffffff',
                     fontSize: '12px',
                     fontWeight: 600,
-                    textDecoration: 'none',
                     whiteSpace: 'nowrap'
                   }}
                 >
-                  Install Chrome Extension ↗
-                </a>
+                  {storeLinkCopied
+                    ? '✓ Web Store Link Copied (Paste in New Tab)'
+                    : 'Get Chrome Extension ↗'}
+                </button>
               </Flex>
             </div>
           )}
