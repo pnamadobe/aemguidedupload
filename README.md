@@ -1,5 +1,9 @@
 # AEM Guided Upload — App Builder UI Extension & Drag-and-Drop Guardrail
 
+[![Watch the AEM Guided Upload Demo](https://img.youtube.com/vi/3UbEF7ByLAw/maxresdefault.jpg)](https://youtu.be/3UbEF7ByLAw)
+
+> 🎥 **Demo Video:** [Watch AEM Guided Upload in action on YouTube](https://youtu.be/3UbEF7ByLAw)
+
 Solves **"There's no guardrails on Upload — users bypass our taxonomy and rights rules"** in AEM Assets View by:
 
 1. **Overriding the built-in `Add assets` header button (`headerMenu.overrideButton`)** in AEM Assets View (`aem/assets/assetsview/1`) with a 3-step **Guided Upload Wizard Modal**.
